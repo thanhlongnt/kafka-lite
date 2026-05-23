@@ -1,5 +1,7 @@
 # Kafka Lite
 
+[![CI](https://github.com/thanhlongnt/kafka-lite/actions/workflows/ci.yml/badge.svg)](https://github.com/thanhlongnt/kafka-lite/actions/workflows/ci.yml)
+
 A lightweight Kafka-like message broker built with gRPC and Raft consensus.
 
 ## Prerequisites
