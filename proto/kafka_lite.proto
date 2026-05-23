@@ -1,0 +1,105 @@
+syntax = "proto3";
+
+package kafka_lite;
+
+option go_package = "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite";
+
+// ── Core message types ────────────────────────────────────────────────────────
+
+message Message {
+  string topic     = 1;
+  int32  partition = 2;
+  bytes  key       = 3;
+  bytes  value     = 4;
+  int64  offset    = 5;
+}
+
+message TopicPartition {
+  string topic     = 1;
+  int32  partition = 2;
+}
+
+// ── Broker service ────────────────────────────────────────────────────────────
+
+service Broker {
+  rpc CreateTopic(CreateTopicRequest) returns (CreateTopicResponse);
+  rpc Produce(ProduceRequest)         returns (ProduceResponse);
+  rpc Fetch(FetchRequest)             returns (stream Message);
+}
+
+message CreateTopicRequest {
+  string topic      = 1;
+  int32  partitions = 2;
+}
+
+message CreateTopicResponse {
+  // empty — success is implied by non-error status
+}
+
+message ProduceRequest {
+  string topic     = 1;
+  int32  partition = 2;
+  bytes  key       = 3;
+  bytes  value     = 4;
+}
+
+message ProduceResponse {
+  int64 offset = 1;
+}
+
+message FetchRequest {
+  string topic       = 1;
+  int32  partition   = 2;
+  int64  start_offset = 3;
+}
+
+// ── Coordinator service (Phase 2) ─────────────────────────────────────────────
+
+service Coordinator {
+  rpc GetMetadata(MetadataRequest)          returns (MetadataResponse);
+  rpc RegisterBroker(RegisterBrokerRequest) returns (RegisterBrokerResponse);
+  rpc JoinGroup(JoinGroupRequest)           returns (JoinGroupResponse);
+  rpc CommitOffsets(CommitOffsetsRequest)   returns (CommitOffsetsResponse);
+}
+
+message MetadataRequest {
+  string topic = 1;
+}
+
+message PartitionInfo {
+  int32  partition   = 1;
+  string broker_addr = 2;
+}
+
+message MetadataResponse {
+  repeated PartitionInfo partitions = 1;
+}
+
+message RegisterBrokerRequest {
+  string addr = 1;
+}
+
+message RegisterBrokerResponse {}
+
+message JoinGroupRequest {
+  string group_id  = 1;
+  string member_id = 2;
+  string topic     = 3;
+}
+
+message JoinGroupResponse {
+  repeated int32 assigned_partitions = 1;
+}
+
+message PartitionOffset {
+  int32 partition = 1;
+  int64 offset    = 2;
+}
+
+message CommitOffsetsRequest {
+  string group_id               = 1;
+  string topic                  = 2;
+  repeated PartitionOffset offsets = 3;
+}
+
+message CommitOffsetsResponse {}
