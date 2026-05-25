@@ -22,7 +22,10 @@ jobs:
         run: go build ./...
 
       - name: Unit tests
-        run: go test ./internal/...
+        run: go test -race ./internal/...
 
       - name: Phase 1 integration tests
         run: go test ./tests/ -run Phase1 -v -timeout 60s
+
+      - name: Log package tests (MemLog + FileLog, race detector)
+        run: go test -race ./internal/log/... -v -timeout 60s
