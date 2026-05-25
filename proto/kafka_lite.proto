@@ -25,6 +25,7 @@ service Broker {
   rpc CreateTopic(CreateTopicRequest) returns (CreateTopicResponse);
   rpc Produce(ProduceRequest)         returns (ProduceResponse);
   rpc Fetch(FetchRequest)             returns (stream Message);
+  rpc InitPartitions(InitPartitionsRequest) returns (InitPartitionsResponse);
 }
 
 message CreateTopicRequest {
@@ -56,10 +57,12 @@ message FetchRequest {
 // ── Coordinator service (Phase 2) ─────────────────────────────────────────────
 
 service Coordinator {
+  rpc CreateTopic(CreateTopicRequest) returns (CreateTopicResponse);
   rpc GetMetadata(MetadataRequest)          returns (MetadataResponse);
   rpc RegisterBroker(RegisterBrokerRequest) returns (RegisterBrokerResponse);
   rpc JoinGroup(JoinGroupRequest)           returns (JoinGroupResponse);
   rpc CommitOffsets(CommitOffsetsRequest)   returns (CommitOffsetsResponse);
+  rpc UpdatePartitionLeader(UpdatePartitionLeaderRequest) returns (UpdatePartitionLeaderResponse);
 }
 
 message MetadataRequest {
@@ -103,3 +106,16 @@ message CommitOffsetsRequest {
 }
 
 message CommitOffsetsResponse {}
+
+message UpdatePartitionLeaderRequest {
+  string topic = 1;
+  int32 partition = 2;
+  string broker_addr = 3;
+}
+message UpdatePartitionLeaderResponse {}
+
+message InitPartitionsRequest {
+  string topic = 1;
+  repeated int32 partitions = 2;
+}
+message InitPartitionsResponse {}
