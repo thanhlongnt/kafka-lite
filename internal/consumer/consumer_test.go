@@ -183,3 +183,4 @@ func TestPollUnknownTopic(t *testing.T) {
 		t.Fatalf("expected NotFound, got %v", err)
 	}
 }
+

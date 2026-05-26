@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
 	"google.golang.org/grpc"
@@ -31,6 +32,10 @@ type Consumer struct {
 	readers   []*partitionReader
 	nextIdx int
 	dialBroker func(ctx context.Context, brokerAddr string) (pb.BrokerClient, error)
+
+	lastRebalanceCheck      time.Time
+	rebalanceInterval       time.Duration
+	rebalanceIntervalIsSet  bool
 }
 
 // New dials brokerAddr and returns a Consumer ready to read from topic/partition
@@ -57,6 +62,9 @@ func (c *Consumer) JoinGroup(ctx context.Context, groupID string, memberID strin
 	c.groupID = groupID
 	c.memberID = memberID
 	c.topic = topic
+	if !c.rebalanceIntervalIsSet {
+		c.rebalanceInterval = 5 * time.Second
+	}
 
 	if c.dialBroker == nil {
 		c.dialBroker = func(_ context.Context, brokerAddr string) (pb.BrokerClient, error) {
@@ -100,6 +108,7 @@ func (c *Consumer) JoinGroup(ctx context.Context, groupID string, memberID strin
 			partition: p,
 		})
 	}
+	c.lastRebalanceCheck = time.Now()
 	return nil
 }
 // SetDialer allows overriding the default gRPC dialer, used by JoinGroup to connect to assigned partition brokers. Only for testing.
@@ -107,11 +116,105 @@ func (c *Consumer) SetDialer(fn func(ctx context.Context, brokerAddr string) (pb
 	c.dialBroker = fn
 }
 
+// SetRebalanceInterval overrides the default 5-second rebalance polling interval. Only for testing.
+func (c *Consumer) SetRebalanceInterval(d time.Duration) {
+	c.rebalanceInterval = d
+	c.rebalanceIntervalIsSet = true
+}
+
+// tryRebalance re-joins the group and reconciles readers if the assignment changed.
+func (c *Consumer) tryRebalance(ctx context.Context) error {
+	c.lastRebalanceCheck = time.Now()
+	join, err := c.coordClient.JoinGroup(ctx, &pb.JoinGroupRequest{
+		GroupId:  c.groupID,
+		MemberId: c.memberID,
+		Topic:    c.topic,
+	})
+	if err != nil {
+		return err
+	}
+
+	newSet := make(map[int32]bool, len(join.AssignedPartitions))
+	for _, p := range join.AssignedPartitions {
+		newSet[p] = true
+	}
+
+	// Check if assignment is unchanged.
+	if len(join.AssignedPartitions) == len(c.readers) {
+		same := true
+		for _, pr := range c.readers {
+			if !newSet[pr.partition] {
+				same = false
+				break
+			}
+		}
+		if same {
+			return nil
+		}
+	}
+
+	// Fetch broker addresses for any newly assigned partitions.
+	meta, err := c.coordClient.GetMetadata(ctx, &pb.MetadataRequest{Topic: c.topic})
+	if err != nil {
+		return err
+	}
+	partitionBroker := make(map[int32]string, len(meta.Partitions))
+	for _, pi := range meta.Partitions {
+		partitionBroker[pi.Partition] = pi.BrokerAddr
+	}
+
+	// Index existing readers by partition so we can reuse them (preserving offsets).
+	existing := make(map[int32]*partitionReader, len(c.readers))
+	for _, pr := range c.readers {
+		existing[pr.partition] = pr
+	}
+
+	// Build the new reader slice.
+	newReaders := make([]*partitionReader, 0, len(join.AssignedPartitions))
+	for _, p := range join.AssignedPartitions {
+		if pr, ok := existing[p]; ok {
+			newReaders = append(newReaders, pr)
+		} else {
+			addr, ok := partitionBroker[p]
+			if !ok {
+				continue
+			}
+			brokerClient, err := c.dialBroker(ctx, addr)
+			if err != nil {
+				continue
+			}
+			newReaders = append(newReaders, &partitionReader{
+				client:    brokerClient,
+				topic:     c.topic,
+				partition: p,
+			})
+		}
+	}
+
+	// Close streams for dropped partitions so they stop receiving data.
+	for p, pr := range existing {
+		if !newSet[p] {
+			pr.stream = nil
+		}
+	}
+
+	c.readers = newReaders
+	c.nextIdx = 0
+	return nil
+}
+
 
 // Poll blocks until the next message is available or ctx is cancelled.
 // On stream EOF or transport error it reconnects from the last received offset.
+// When in group mode, Poll periodically re-joins the group to detect rebalances.
 func (c *Consumer) Poll(ctx context.Context) (*pb.Message, error) {
 	if len(c.readers) > 0 {
+		if time.Since(c.lastRebalanceCheck) >= c.rebalanceInterval {
+			_ = c.tryRebalance(ctx)
+		}
+		if len(c.readers) == 0 {
+			return nil, fmt.Errorf("no partitions assigned after rebalance")
+		}
 		pr := c.readers[c.nextIdx%len(c.readers)]
 		c.nextIdx++
 		return pr.poll(ctx)
@@ -177,6 +280,15 @@ func (c *Consumer) CommitOffsets(ctx context.Context) error {
 // Offset returns the next offset that Poll will request.
 func (c *Consumer) Offset() int64 {
 	return c.nextOffset
+}
+
+// AssignedPartitions returns the partition IDs currently held by this consumer.
+func (c *Consumer) AssignedPartitions() []int32 {
+	out := make([]int32, len(c.readers))
+	for i, pr := range c.readers {
+		out[i] = pr.partition
+	}
+	return out
 }
 
 // Close releases the underlying gRPC connection.

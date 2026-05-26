@@ -35,6 +35,10 @@ type coordinator struct {
 	dialBroker func(ctx context.Context, addr string) (pb.BrokerClient, error) // for testing
 }
 
+// Coordinator is the exported type alias used by tests that need to embed the
+// coordinator into a combined gRPC server.
+type Coordinator = coordinator
+
 func New() *coordinator {
 	c := &coordinator{
 		topics: make(map[string][]*pb.PartitionInfo),
@@ -51,6 +55,11 @@ func New() *coordinator {
 	}
 	return c
 }
+
+// NewExported is an alias for New, used when the caller needs the exported
+// *Coordinator type (e.g. to pass it to pb.RegisterCoordinatorServer from a
+// test package).
+func NewExported() *Coordinator { return New() }
 
 // Test helper to set the broker dialer function.
 func (c *coordinator) SetBrokerDialer(fn func(ctx context.Context, addr string) (pb.BrokerClient, error)) {
