@@ -15,8 +15,9 @@ type Partition struct {
 	cond *sync.Cond
 }
 
-func newPartition() *Partition {
+func newPartition(l log.Log) *Partition {
 	return &Partition{
+		log:  l,
 		cond: sync.NewCond(&sync.Mutex{}),
 	}
 }

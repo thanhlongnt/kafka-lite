@@ -20,9 +20,41 @@ const bufSize = 1 << 20
 
 func newTestServer(t *testing.T) pb.BrokerClient {
 	t.Helper()
+	return serveAndConnect(t, broker.New())
+}
+
+func newTestServerWithDataDir(t *testing.T, dataDir string) (pb.BrokerClient, func()) {
+	t.Helper()
+	b, err := broker.NewWithDataDir(dataDir)
+	if err != nil {
+		t.Fatalf("NewWithDataDir: %v", err)
+	}
 	lis := bufconn.Listen(bufSize)
 	srv := grpc.NewServer()
-	pb.RegisterBrokerServer(srv, broker.New())
+	pb.RegisterBrokerServer(srv, b)
+	go func() {
+		if err := srv.Serve(lis); err != nil && err != grpc.ErrServerStopped {
+			t.Logf("server error: %v", err)
+		}
+	}()
+	conn, err := grpc.NewClient("passthrough://bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("dial bufconn: %v", err)
+	}
+	stop := func() { srv.Stop(); lis.Close(); conn.Close() }
+	return pb.NewBrokerClient(conn), stop
+}
+
+func serveAndConnect(t *testing.T, b *broker.Broker) pb.BrokerClient {
+	t.Helper()
+	lis := bufconn.Listen(bufSize)
+	srv := grpc.NewServer()
+	pb.RegisterBrokerServer(srv, b)
 	go func() {
 		if err := srv.Serve(lis); err != nil && err != grpc.ErrServerStopped {
 			t.Logf("server error: %v", err)
@@ -184,6 +216,70 @@ func TestConcurrentProducesOrderedOnFetch(t *testing.T) {
 		if msg.Offset != int64(i) {
 			t.Fatalf("message %d has offset %d", i, msg.Offset)
 		}
+	}
+}
+
+// TestBrokerRestoreFromDataDir verifies that topics and messages survive a broker restart.
+func TestBrokerRestoreFromDataDir(t *testing.T) {
+	dir := t.TempDir()
+	const topic = "restore-test"
+	const partitions = 2
+	const msgsPerPartition = 5
+
+	// --- first broker: create topic, produce messages, stop ---
+	client1, stop1 := newTestServerWithDataDir(t, dir)
+	mustCreateTopic(t, client1, topic, partitions)
+
+	for p := int32(0); p < partitions; p++ {
+		for i := 0; i < msgsPerPartition; i++ {
+			_, err := client1.Produce(context.Background(), &pb.ProduceRequest{
+				Topic:     topic,
+				Partition: p,
+				Value:     []byte{byte(p*10 + int32(i))},
+			})
+			if err != nil {
+				t.Fatalf("Produce p%d[%d]: %v", p, i, err)
+			}
+		}
+	}
+	stop1()
+
+	// --- second broker: open same data dir, verify state is restored ---
+	client2, stop2 := newTestServerWithDataDir(t, dir)
+	defer stop2()
+
+	// CreateTopic should return AlreadyExists — topic was restored from disk.
+	_, err := client2.CreateTopic(context.Background(), &pb.CreateTopicRequest{
+		Topic: topic, Partitions: partitions,
+	})
+	if status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("expected AlreadyExists for restored topic, got %v", err)
+	}
+
+	// All messages should be readable from each partition.
+	for p := int32(0); p < partitions; p++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		stream, err := client2.Fetch(ctx, &pb.FetchRequest{
+			Topic: topic, Partition: p, StartOffset: 0,
+		})
+		if err != nil {
+			cancel()
+			t.Fatalf("Fetch p%d: %v", p, err)
+		}
+		for i := 0; i < msgsPerPartition; i++ {
+			msg, err := stream.Recv()
+			if err != nil {
+				cancel()
+				t.Fatalf("Recv p%d[%d]: %v", p, i, err)
+			}
+			if msg.Offset != int64(i) {
+				t.Errorf("p%d[%d]: expected offset %d, got %d", p, i, i, msg.Offset)
+			}
+			if msg.Value[0] != byte(p*10+int32(i)) {
+				t.Errorf("p%d[%d]: unexpected value %d", p, i, msg.Value[0])
+			}
+		}
+		cancel()
 	}
 }
 

@@ -4,8 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"sync"
 
+	"github.com/thanhlongnt/kafka-lite/internal/log"
 	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -16,17 +21,88 @@ import (
 // Broker manages topics and their partitions and implements the BrokerServer gRPC interface.
 type Broker struct {
 	pb.UnimplementedBrokerServer
-	mu     sync.RWMutex
-	topics map[string]map[int32]*Partition // sparse: only partitions this broker owns
+	mu      sync.RWMutex
+	topics  map[string]map[int32]*Partition // sparse: only partitions this broker owns
+	dataDir string                          // empty → in-memory logs; non-empty → file-backed logs
 
 	coordClient pb.CoordinatorClient
 	coordConn   *grpc.ClientConn
 }
 
+// New returns a Broker that stores all messages in memory.
 func New() *Broker {
-	return &Broker{
-		topics: make(map[string]map[int32]*Partition),
+	return &Broker{topics: make(map[string]map[int32]*Partition)}
+}
+
+// NewWithDataDir returns a Broker that persists each partition's log under
+// dataDir/<topic>/<partition>/. Existing topics and partitions are restored
+// automatically by scanning dataDir on startup.
+func NewWithDataDir(dataDir string) (*Broker, error) {
+	b := &Broker{
+		topics:  make(map[string]map[int32]*Partition),
+		dataDir: dataDir,
 	}
+	if err := b.restore(); err != nil {
+		return nil, fmt.Errorf("restore from %s: %w", dataDir, err)
+	}
+	return b, nil
+}
+
+// restore scans dataDir for existing topic/partition directories and opens a
+// FileLog for each one, rebuilding the in-memory topics map.
+func (b *Broker) restore() error {
+	topicEntries, err := os.ReadDir(b.dataDir)
+	if os.IsNotExist(err) {
+		return nil // fresh start, nothing to restore
+	}
+	if err != nil {
+		return err
+	}
+
+	for _, te := range topicEntries {
+		if !te.IsDir() {
+			continue
+		}
+		topic := te.Name()
+		topicDir := filepath.Join(b.dataDir, topic)
+
+		partEntries, err := os.ReadDir(topicDir)
+		if err != nil {
+			return err
+		}
+
+		// Collect valid numeric partition directories.
+		type partEntry struct {
+			idx int
+			dir string
+		}
+		var parts []partEntry
+		for _, pe := range partEntries {
+			if !pe.IsDir() {
+				continue
+			}
+			idx, err := strconv.Atoi(pe.Name())
+			if err != nil {
+				continue // skip non-numeric entries
+			}
+			parts = append(parts, partEntry{idx, filepath.Join(topicDir, pe.Name())})
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		sort.Slice(parts, func(i, j int) bool { return parts[i].idx < parts[j].idx })
+
+		partitions := make(map[int32]*Partition, len(parts))
+		for _, pe := range parts {
+			fl, err := log.NewFileLog(pe.dir)
+			if err != nil {
+				return fmt.Errorf("open log %s: %w", pe.dir, err)
+			}
+			partitions[int32(pe.idx)] = newPartition(fl)
+		}
+		b.topics[topic] = partitions
+	}
+	return nil
 }
 
 // ConnectCoordinator dials the coordinator and stores the client for proxying and registration.
@@ -64,7 +140,18 @@ func (b *Broker) CreateTopic(_ context.Context, req *pb.CreateTopicRequest) (*pb
 
 	parts := make(map[int32]*Partition, req.Partitions)
 	for i := int32(0); i < req.Partitions; i++ {
-		parts[i] = newPartition()
+		var l log.Log
+		if b.dataDir != "" {
+			dir := filepath.Join(b.dataDir, req.Topic, fmt.Sprintf("%d", i))
+			fl, err := log.NewFileLog(dir)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "create file log: %v", err)
+			}
+			l = fl
+		} else {
+			l = &log.MemLog{}
+		}
+		parts[i] = newPartition(l)
 	}
 	b.topics[req.Topic] = parts
 	return &pb.CreateTopicResponse{}, nil
@@ -84,7 +171,18 @@ func (b *Broker) InitPartitions(_ context.Context, req *pb.InitPartitionsRequest
 	}
 	for _, pid := range req.Partitions {
 		if _, exists := b.topics[req.Topic][pid]; !exists {
-			b.topics[req.Topic][pid] = newPartition()
+			var l log.Log
+			if b.dataDir != "" {
+				dir := filepath.Join(b.dataDir, req.Topic, fmt.Sprintf("%d", pid))
+				fl, err := log.NewFileLog(dir)
+				if err != nil {
+					return nil, status.Errorf(codes.Internal, "create file log: %v", err)
+				}
+				l = fl
+			} else {
+				l = &log.MemLog{}
+			}
+			b.topics[req.Topic][pid] = newPartition(l)
 		}
 	}
 	return &pb.InitPartitionsResponse{}, nil

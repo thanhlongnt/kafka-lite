@@ -27,6 +27,16 @@ go build -o cli ./cmd/cli
 
 The broker listens on `:9092` by default. Use `-addr` to change the port.
 
+### Persistent storage
+
+By default the broker stores messages in memory (lost on restart). Pass `-data-dir` to persist messages to disk:
+
+```bash
+./broker -addr :9092 -data-dir ./data
+```
+
+Messages are written to `<data-dir>/<topic>/<partition>/segment.log`. On restart with the same `-data-dir`, all previously created topics and their messages are restored automatically — no `create-topic` call is needed again.
+
 ## CLI Usage
 
 ### Create a topic
