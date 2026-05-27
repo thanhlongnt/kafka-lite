@@ -19,9 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Broker_CreateTopic_FullMethodName = "/kafka_lite.Broker/CreateTopic"
-	Broker_Produce_FullMethodName     = "/kafka_lite.Broker/Produce"
-	Broker_Fetch_FullMethodName       = "/kafka_lite.Broker/Fetch"
+	Broker_CreateTopic_FullMethodName    = "/kafka_lite.Broker/CreateTopic"
+	Broker_Produce_FullMethodName        = "/kafka_lite.Broker/Produce"
+	Broker_Fetch_FullMethodName          = "/kafka_lite.Broker/Fetch"
+	Broker_InitPartitions_FullMethodName = "/kafka_lite.Broker/InitPartitions"
 )
 
 // BrokerClient is the client API for Broker service.
@@ -31,6 +32,7 @@ type BrokerClient interface {
 	CreateTopic(ctx context.Context, in *CreateTopicRequest, opts ...grpc.CallOption) (*CreateTopicResponse, error)
 	Produce(ctx context.Context, in *ProduceRequest, opts ...grpc.CallOption) (*ProduceResponse, error)
 	Fetch(ctx context.Context, in *FetchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Message], error)
+	InitPartitions(ctx context.Context, in *InitPartitionsRequest, opts ...grpc.CallOption) (*InitPartitionsResponse, error)
 }
 
 type brokerClient struct {
@@ -80,6 +82,16 @@ func (c *brokerClient) Fetch(ctx context.Context, in *FetchRequest, opts ...grpc
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Broker_FetchClient = grpc.ServerStreamingClient[Message]
 
+func (c *brokerClient) InitPartitions(ctx context.Context, in *InitPartitionsRequest, opts ...grpc.CallOption) (*InitPartitionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InitPartitionsResponse)
+	err := c.cc.Invoke(ctx, Broker_InitPartitions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // BrokerServer is the server API for Broker service.
 // All implementations must embed UnimplementedBrokerServer
 // for forward compatibility.
@@ -87,6 +99,7 @@ type BrokerServer interface {
 	CreateTopic(context.Context, *CreateTopicRequest) (*CreateTopicResponse, error)
 	Produce(context.Context, *ProduceRequest) (*ProduceResponse, error)
 	Fetch(*FetchRequest, grpc.ServerStreamingServer[Message]) error
+	InitPartitions(context.Context, *InitPartitionsRequest) (*InitPartitionsResponse, error)
 	mustEmbedUnimplementedBrokerServer()
 }
 
@@ -105,6 +118,9 @@ func (UnimplementedBrokerServer) Produce(context.Context, *ProduceRequest) (*Pro
 }
 func (UnimplementedBrokerServer) Fetch(*FetchRequest, grpc.ServerStreamingServer[Message]) error {
 	return status.Error(codes.Unimplemented, "method Fetch not implemented")
+}
+func (UnimplementedBrokerServer) InitPartitions(context.Context, *InitPartitionsRequest) (*InitPartitionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InitPartitions not implemented")
 }
 func (UnimplementedBrokerServer) mustEmbedUnimplementedBrokerServer() {}
 func (UnimplementedBrokerServer) testEmbeddedByValue()                {}
@@ -174,6 +190,24 @@ func _Broker_Fetch_Handler(srv interface{}, stream grpc.ServerStream) error {
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Broker_FetchServer = grpc.ServerStreamingServer[Message]
 
+func _Broker_InitPartitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InitPartitionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BrokerServer).InitPartitions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Broker_InitPartitions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BrokerServer).InitPartitions(ctx, req.(*InitPartitionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Broker_ServiceDesc is the grpc.ServiceDesc for Broker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -189,6 +223,10 @@ var Broker_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Produce",
 			Handler:    _Broker_Produce_Handler,
 		},
+		{
+			MethodName: "InitPartitions",
+			Handler:    _Broker_InitPartitions_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -201,20 +239,24 @@ var Broker_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	Coordinator_GetMetadata_FullMethodName    = "/kafka_lite.Coordinator/GetMetadata"
-	Coordinator_RegisterBroker_FullMethodName = "/kafka_lite.Coordinator/RegisterBroker"
-	Coordinator_JoinGroup_FullMethodName      = "/kafka_lite.Coordinator/JoinGroup"
-	Coordinator_CommitOffsets_FullMethodName  = "/kafka_lite.Coordinator/CommitOffsets"
+	Coordinator_CreateTopic_FullMethodName           = "/kafka_lite.Coordinator/CreateTopic"
+	Coordinator_GetMetadata_FullMethodName           = "/kafka_lite.Coordinator/GetMetadata"
+	Coordinator_RegisterBroker_FullMethodName        = "/kafka_lite.Coordinator/RegisterBroker"
+	Coordinator_JoinGroup_FullMethodName             = "/kafka_lite.Coordinator/JoinGroup"
+	Coordinator_CommitOffsets_FullMethodName         = "/kafka_lite.Coordinator/CommitOffsets"
+	Coordinator_UpdatePartitionLeader_FullMethodName = "/kafka_lite.Coordinator/UpdatePartitionLeader"
 )
 
 // CoordinatorClient is the client API for Coordinator service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type CoordinatorClient interface {
+	CreateTopic(ctx context.Context, in *CreateTopicRequest, opts ...grpc.CallOption) (*CreateTopicResponse, error)
 	GetMetadata(ctx context.Context, in *MetadataRequest, opts ...grpc.CallOption) (*MetadataResponse, error)
 	RegisterBroker(ctx context.Context, in *RegisterBrokerRequest, opts ...grpc.CallOption) (*RegisterBrokerResponse, error)
 	JoinGroup(ctx context.Context, in *JoinGroupRequest, opts ...grpc.CallOption) (*JoinGroupResponse, error)
 	CommitOffsets(ctx context.Context, in *CommitOffsetsRequest, opts ...grpc.CallOption) (*CommitOffsetsResponse, error)
+	UpdatePartitionLeader(ctx context.Context, in *UpdatePartitionLeaderRequest, opts ...grpc.CallOption) (*UpdatePartitionLeaderResponse, error)
 }
 
 type coordinatorClient struct {
@@ -223,6 +265,16 @@ type coordinatorClient struct {
 
 func NewCoordinatorClient(cc grpc.ClientConnInterface) CoordinatorClient {
 	return &coordinatorClient{cc}
+}
+
+func (c *coordinatorClient) CreateTopic(ctx context.Context, in *CreateTopicRequest, opts ...grpc.CallOption) (*CreateTopicResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateTopicResponse)
+	err := c.cc.Invoke(ctx, Coordinator_CreateTopic_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *coordinatorClient) GetMetadata(ctx context.Context, in *MetadataRequest, opts ...grpc.CallOption) (*MetadataResponse, error) {
@@ -265,14 +317,26 @@ func (c *coordinatorClient) CommitOffsets(ctx context.Context, in *CommitOffsets
 	return out, nil
 }
 
+func (c *coordinatorClient) UpdatePartitionLeader(ctx context.Context, in *UpdatePartitionLeaderRequest, opts ...grpc.CallOption) (*UpdatePartitionLeaderResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdatePartitionLeaderResponse)
+	err := c.cc.Invoke(ctx, Coordinator_UpdatePartitionLeader_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CoordinatorServer is the server API for Coordinator service.
 // All implementations must embed UnimplementedCoordinatorServer
 // for forward compatibility.
 type CoordinatorServer interface {
+	CreateTopic(context.Context, *CreateTopicRequest) (*CreateTopicResponse, error)
 	GetMetadata(context.Context, *MetadataRequest) (*MetadataResponse, error)
 	RegisterBroker(context.Context, *RegisterBrokerRequest) (*RegisterBrokerResponse, error)
 	JoinGroup(context.Context, *JoinGroupRequest) (*JoinGroupResponse, error)
 	CommitOffsets(context.Context, *CommitOffsetsRequest) (*CommitOffsetsResponse, error)
+	UpdatePartitionLeader(context.Context, *UpdatePartitionLeaderRequest) (*UpdatePartitionLeaderResponse, error)
 	mustEmbedUnimplementedCoordinatorServer()
 }
 
@@ -283,6 +347,9 @@ type CoordinatorServer interface {
 // pointer dereference when methods are called.
 type UnimplementedCoordinatorServer struct{}
 
+func (UnimplementedCoordinatorServer) CreateTopic(context.Context, *CreateTopicRequest) (*CreateTopicResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateTopic not implemented")
+}
 func (UnimplementedCoordinatorServer) GetMetadata(context.Context, *MetadataRequest) (*MetadataResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetMetadata not implemented")
 }
@@ -294,6 +361,9 @@ func (UnimplementedCoordinatorServer) JoinGroup(context.Context, *JoinGroupReque
 }
 func (UnimplementedCoordinatorServer) CommitOffsets(context.Context, *CommitOffsetsRequest) (*CommitOffsetsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CommitOffsets not implemented")
+}
+func (UnimplementedCoordinatorServer) UpdatePartitionLeader(context.Context, *UpdatePartitionLeaderRequest) (*UpdatePartitionLeaderResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdatePartitionLeader not implemented")
 }
 func (UnimplementedCoordinatorServer) mustEmbedUnimplementedCoordinatorServer() {}
 func (UnimplementedCoordinatorServer) testEmbeddedByValue()                     {}
@@ -314,6 +384,24 @@ func RegisterCoordinatorServer(s grpc.ServiceRegistrar, srv CoordinatorServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&Coordinator_ServiceDesc, srv)
+}
+
+func _Coordinator_CreateTopic_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateTopicRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoordinatorServer).CreateTopic(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Coordinator_CreateTopic_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoordinatorServer).CreateTopic(ctx, req.(*CreateTopicRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _Coordinator_GetMetadata_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -388,6 +476,24 @@ func _Coordinator_CommitOffsets_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Coordinator_UpdatePartitionLeader_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdatePartitionLeaderRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoordinatorServer).UpdatePartitionLeader(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Coordinator_UpdatePartitionLeader_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoordinatorServer).UpdatePartitionLeader(ctx, req.(*UpdatePartitionLeaderRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Coordinator_ServiceDesc is the grpc.ServiceDesc for Coordinator service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -395,6 +501,10 @@ var Coordinator_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "kafka_lite.Coordinator",
 	HandlerType: (*CoordinatorServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "CreateTopic",
+			Handler:    _Coordinator_CreateTopic_Handler,
+		},
 		{
 			MethodName: "GetMetadata",
 			Handler:    _Coordinator_GetMetadata_Handler,
@@ -410,6 +520,10 @@ var Coordinator_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CommitOffsets",
 			Handler:    _Coordinator_CommitOffsets_Handler,
+		},
+		{
+			MethodName: "UpdatePartitionLeader",
+			Handler:    _Coordinator_UpdatePartitionLeader_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

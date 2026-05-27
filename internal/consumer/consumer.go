@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
 	"google.golang.org/grpc"
@@ -14,6 +15,7 @@ import (
 
 // Consumer reads messages from a single topic/partition, tracking its own offset.
 // It opens a server-streaming Fetch RPC and reconnects automatically on stream errors.
+// Phase 2: call joinGroup to join consumer group, poll round-robin across all partitions
 type Consumer struct {
 	client     pb.BrokerClient
 	conn       *grpc.ClientConn
@@ -22,6 +24,18 @@ type Consumer struct {
 	nextOffset int64
 
 	stream pb.Broker_FetchClient
+
+	// Phase 2
+	coordClient pb.CoordinatorClient
+	groupID    string
+	memberID   string
+	readers   []*partitionReader
+	nextIdx int
+	dialBroker func(ctx context.Context, brokerAddr string) (pb.BrokerClient, error)
+
+	lastRebalanceCheck      time.Time
+	rebalanceInterval       time.Duration
+	rebalanceIntervalIsSet  bool
 }
 
 // New dials brokerAddr and returns a Consumer ready to read from topic/partition
@@ -42,9 +56,169 @@ func New(brokerAddr, topic string, partition int32, startOffset int64, opts ...g
 	}, nil
 }
 
+// JoinGroup joins consumer group via coordinator and opens conn to each assigned partition. Phase 2.
+func (c *Consumer) JoinGroup(ctx context.Context, groupID string, memberID string, topic string) error {
+	c.coordClient = pb.NewCoordinatorClient(c.conn)
+	c.groupID = groupID
+	c.memberID = memberID
+	c.topic = topic
+	if !c.rebalanceIntervalIsSet {
+		c.rebalanceInterval = 5 * time.Second
+	}
+
+	if c.dialBroker == nil {
+		c.dialBroker = func(_ context.Context, brokerAddr string) (pb.BrokerClient, error) {
+			conn, err := grpc.NewClient(brokerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			if err != nil {
+				return nil, fmt.Errorf("dial %s: %w", brokerAddr, err)
+			}
+			return pb.NewBrokerClient(conn), nil
+		}
+	}
+	join, err := c.coordClient.JoinGroup(ctx, &pb.JoinGroupRequest{
+		GroupId: groupID,
+		MemberId: memberID,
+		Topic: topic,
+	})
+	if err != nil {
+		return fmt.Errorf("join group: %w", err)
+	}
+
+	meta, err := c.coordClient.GetMetadata(ctx, &pb.MetadataRequest{Topic: topic})
+	if err != nil {
+		return fmt.Errorf("get metadata: %w", err)
+	}
+	partitionBroker := make(map[int32]string, len(meta.Partitions))
+	for _, pi := range meta.Partitions {
+		partitionBroker[pi.Partition] = pi.BrokerAddr
+	}
+	c.readers = make([]*partitionReader, 0, len(join.AssignedPartitions))
+	for _, p := range join.AssignedPartitions {
+		addr, ok := partitionBroker[p]
+		if !ok {
+			return fmt.Errorf("metadata missing partition %d", p)
+		}
+		brokerClient, err := c.dialBroker(ctx, addr)
+		if err != nil {
+			return fmt.Errorf("dial broker for partition %d: %w", p, err)
+		}
+		c.readers = append(c.readers, &partitionReader{
+			client: brokerClient,
+			topic: topic,
+			partition: p,
+		})
+	}
+	c.lastRebalanceCheck = time.Now()
+	return nil
+}
+// SetDialer allows overriding the default gRPC dialer, used by JoinGroup to connect to assigned partition brokers. Only for testing.
+func (c *Consumer) SetDialer(fn func(ctx context.Context, brokerAddr string) (pb.BrokerClient, error)) {
+	c.dialBroker = fn
+}
+
+// SetRebalanceInterval overrides the default 5-second rebalance polling interval. Only for testing.
+func (c *Consumer) SetRebalanceInterval(d time.Duration) {
+	c.rebalanceInterval = d
+	c.rebalanceIntervalIsSet = true
+}
+
+// tryRebalance re-joins the group and reconciles readers if the assignment changed.
+func (c *Consumer) tryRebalance(ctx context.Context) error {
+	c.lastRebalanceCheck = time.Now()
+	join, err := c.coordClient.JoinGroup(ctx, &pb.JoinGroupRequest{
+		GroupId:  c.groupID,
+		MemberId: c.memberID,
+		Topic:    c.topic,
+	})
+	if err != nil {
+		return err
+	}
+
+	newSet := make(map[int32]bool, len(join.AssignedPartitions))
+	for _, p := range join.AssignedPartitions {
+		newSet[p] = true
+	}
+
+	// Check if assignment is unchanged.
+	if len(join.AssignedPartitions) == len(c.readers) {
+		same := true
+		for _, pr := range c.readers {
+			if !newSet[pr.partition] {
+				same = false
+				break
+			}
+		}
+		if same {
+			return nil
+		}
+	}
+
+	// Fetch broker addresses for any newly assigned partitions.
+	meta, err := c.coordClient.GetMetadata(ctx, &pb.MetadataRequest{Topic: c.topic})
+	if err != nil {
+		return err
+	}
+	partitionBroker := make(map[int32]string, len(meta.Partitions))
+	for _, pi := range meta.Partitions {
+		partitionBroker[pi.Partition] = pi.BrokerAddr
+	}
+
+	// Index existing readers by partition so we can reuse them (preserving offsets).
+	existing := make(map[int32]*partitionReader, len(c.readers))
+	for _, pr := range c.readers {
+		existing[pr.partition] = pr
+	}
+
+	// Build the new reader slice.
+	newReaders := make([]*partitionReader, 0, len(join.AssignedPartitions))
+	for _, p := range join.AssignedPartitions {
+		if pr, ok := existing[p]; ok {
+			newReaders = append(newReaders, pr)
+		} else {
+			addr, ok := partitionBroker[p]
+			if !ok {
+				continue
+			}
+			brokerClient, err := c.dialBroker(ctx, addr)
+			if err != nil {
+				continue
+			}
+			newReaders = append(newReaders, &partitionReader{
+				client:    brokerClient,
+				topic:     c.topic,
+				partition: p,
+			})
+		}
+	}
+
+	// Close streams for dropped partitions so they stop receiving data.
+	for p, pr := range existing {
+		if !newSet[p] {
+			pr.stream = nil
+		}
+	}
+
+	c.readers = newReaders
+	c.nextIdx = 0
+	return nil
+}
+
+
 // Poll blocks until the next message is available or ctx is cancelled.
 // On stream EOF or transport error it reconnects from the last received offset.
+// When in group mode, Poll periodically re-joins the group to detect rebalances.
 func (c *Consumer) Poll(ctx context.Context) (*pb.Message, error) {
+	if len(c.readers) > 0 {
+		if time.Since(c.lastRebalanceCheck) >= c.rebalanceInterval {
+			_ = c.tryRebalance(ctx)
+		}
+		if len(c.readers) == 0 {
+			return nil, fmt.Errorf("no partitions assigned after rebalance")
+		}
+		pr := c.readers[c.nextIdx%len(c.readers)]
+		c.nextIdx++
+		return pr.poll(ctx)
+	}
 	for {
 		if c.stream == nil {
 			if err := c.connect(ctx); err != nil {
@@ -87,9 +261,34 @@ func (c *Consumer) Poll(ctx context.Context) (*pb.Message, error) {
 	}
 }
 
+// CommitOffsets commits the current offset to the broker. Phase 2: commit all assigned partitions.
+func (c *Consumer) CommitOffsets(ctx context.Context) error {
+	offsets := make([]*pb.PartitionOffset, len(c.readers))
+	for i, pr := range c.readers {
+		offsets[i] = &pb.PartitionOffset{
+			Partition: pr.partition,
+			Offset: pr.nextOffset,
+		}
+	}
+	_, err := c.coordClient.CommitOffsets(ctx, &pb.CommitOffsetsRequest{
+		GroupId: c.groupID,
+		Topic: c.topic,
+		Offsets: offsets,
+	})
+	return err
+}
 // Offset returns the next offset that Poll will request.
 func (c *Consumer) Offset() int64 {
 	return c.nextOffset
+}
+
+// AssignedPartitions returns the partition IDs currently held by this consumer.
+func (c *Consumer) AssignedPartitions() []int32 {
+	out := make([]int32, len(c.readers))
+	for i, pr := range c.readers {
+		out[i] = pr.partition
+	}
+	return out
 }
 
 // Close releases the underlying gRPC connection.
@@ -111,4 +310,56 @@ func (c *Consumer) connect(ctx context.Context) error {
 	}
 	c.stream = stream
 	return nil
+}
+
+// partitionReader manages a Fetch stream for a single partition, used in phase 2 when consumer joins a group and is assigned multiple partitions.
+type partitionReader struct {
+	client pb.BrokerClient
+	topic string
+	partition int32
+	nextOffset int64
+
+	stream pb.Broker_FetchClient
+}
+
+func (pr *partitionReader) poll(ctx context.Context) (*pb.Message, error) {
+	for {
+		if pr.stream == nil {
+			stream, err := pr.client.Fetch(ctx, &pb.FetchRequest{
+				Topic: pr.topic,
+				Partition: pr.partition,
+				StartOffset: pr.nextOffset,
+			})
+			if err != nil {
+				return nil, err
+			}
+			pr.stream = stream
+		}
+
+		msg, err := pr.stream.Recv()
+		if err == nil {
+			pr.nextOffset = msg.Offset + 1
+			return msg, nil
+		}
+
+		pr.stream = nil
+
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		if err == io.EOF {
+			continue
+		}
+
+		if st, ok := status.FromError(err); ok {
+			switch st.Code() {
+			case codes.Unavailable, codes.Internal, codes.Unknown:
+				continue
+			default:
+				return nil, err
+			}
+		}
+		return nil, err
+	}
 }

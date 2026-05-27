@@ -881,6 +881,190 @@ func (*CommitOffsetsResponse) Descriptor() ([]byte, []int) {
 	return file_kafka_lite_proto_rawDescGZIP(), []int{16}
 }
 
+type UpdatePartitionLeaderRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Topic         string                 `protobuf:"bytes,1,opt,name=topic,proto3" json:"topic,omitempty"`
+	Partition     int32                  `protobuf:"varint,2,opt,name=partition,proto3" json:"partition,omitempty"`
+	BrokerAddr    string                 `protobuf:"bytes,3,opt,name=broker_addr,json=brokerAddr,proto3" json:"broker_addr,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdatePartitionLeaderRequest) Reset() {
+	*x = UpdatePartitionLeaderRequest{}
+	mi := &file_kafka_lite_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdatePartitionLeaderRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdatePartitionLeaderRequest) ProtoMessage() {}
+
+func (x *UpdatePartitionLeaderRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kafka_lite_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdatePartitionLeaderRequest.ProtoReflect.Descriptor instead.
+func (*UpdatePartitionLeaderRequest) Descriptor() ([]byte, []int) {
+	return file_kafka_lite_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *UpdatePartitionLeaderRequest) GetTopic() string {
+	if x != nil {
+		return x.Topic
+	}
+	return ""
+}
+
+func (x *UpdatePartitionLeaderRequest) GetPartition() int32 {
+	if x != nil {
+		return x.Partition
+	}
+	return 0
+}
+
+func (x *UpdatePartitionLeaderRequest) GetBrokerAddr() string {
+	if x != nil {
+		return x.BrokerAddr
+	}
+	return ""
+}
+
+type UpdatePartitionLeaderResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdatePartitionLeaderResponse) Reset() {
+	*x = UpdatePartitionLeaderResponse{}
+	mi := &file_kafka_lite_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdatePartitionLeaderResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdatePartitionLeaderResponse) ProtoMessage() {}
+
+func (x *UpdatePartitionLeaderResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kafka_lite_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdatePartitionLeaderResponse.ProtoReflect.Descriptor instead.
+func (*UpdatePartitionLeaderResponse) Descriptor() ([]byte, []int) {
+	return file_kafka_lite_proto_rawDescGZIP(), []int{18}
+}
+
+type InitPartitionsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Topic         string                 `protobuf:"bytes,1,opt,name=topic,proto3" json:"topic,omitempty"`
+	Partitions    []int32                `protobuf:"varint,2,rep,packed,name=partitions,proto3" json:"partitions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InitPartitionsRequest) Reset() {
+	*x = InitPartitionsRequest{}
+	mi := &file_kafka_lite_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InitPartitionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InitPartitionsRequest) ProtoMessage() {}
+
+func (x *InitPartitionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kafka_lite_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InitPartitionsRequest.ProtoReflect.Descriptor instead.
+func (*InitPartitionsRequest) Descriptor() ([]byte, []int) {
+	return file_kafka_lite_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *InitPartitionsRequest) GetTopic() string {
+	if x != nil {
+		return x.Topic
+	}
+	return ""
+}
+
+func (x *InitPartitionsRequest) GetPartitions() []int32 {
+	if x != nil {
+		return x.Partitions
+	}
+	return nil
+}
+
+type InitPartitionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InitPartitionsResponse) Reset() {
+	*x = InitPartitionsResponse{}
+	mi := &file_kafka_lite_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InitPartitionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InitPartitionsResponse) ProtoMessage() {}
+
+func (x *InitPartitionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kafka_lite_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InitPartitionsResponse.ProtoReflect.Descriptor instead.
+func (*InitPartitionsResponse) Descriptor() ([]byte, []int) {
+	return file_kafka_lite_proto_rawDescGZIP(), []int{20}
+}
+
 var File_kafka_lite_proto protoreflect.FileDescriptor
 
 const file_kafka_lite_proto_rawDesc = "" +
@@ -939,16 +1123,31 @@ const file_kafka_lite_proto_rawDesc = "" +
 	"\bgroup_id\x18\x01 \x01(\tR\agroupId\x12\x14\n" +
 	"\x05topic\x18\x02 \x01(\tR\x05topic\x125\n" +
 	"\aoffsets\x18\x03 \x03(\v2\x1b.kafka_lite.PartitionOffsetR\aoffsets\"\x17\n" +
-	"\x15CommitOffsetsResponse2\xd6\x01\n" +
+	"\x15CommitOffsetsResponse\"s\n" +
+	"\x1cUpdatePartitionLeaderRequest\x12\x14\n" +
+	"\x05topic\x18\x01 \x01(\tR\x05topic\x12\x1c\n" +
+	"\tpartition\x18\x02 \x01(\x05R\tpartition\x12\x1f\n" +
+	"\vbroker_addr\x18\x03 \x01(\tR\n" +
+	"brokerAddr\"\x1f\n" +
+	"\x1dUpdatePartitionLeaderResponse\"M\n" +
+	"\x15InitPartitionsRequest\x12\x14\n" +
+	"\x05topic\x18\x01 \x01(\tR\x05topic\x12\x1e\n" +
+	"\n" +
+	"partitions\x18\x02 \x03(\x05R\n" +
+	"partitions\"\x18\n" +
+	"\x16InitPartitionsResponse2\xaf\x02\n" +
 	"\x06Broker\x12N\n" +
 	"\vCreateTopic\x12\x1e.kafka_lite.CreateTopicRequest\x1a\x1f.kafka_lite.CreateTopicResponse\x12B\n" +
 	"\aProduce\x12\x1a.kafka_lite.ProduceRequest\x1a\x1b.kafka_lite.ProduceResponse\x128\n" +
-	"\x05Fetch\x12\x18.kafka_lite.FetchRequest\x1a\x13.kafka_lite.Message0\x012\xd0\x02\n" +
-	"\vCoordinator\x12H\n" +
+	"\x05Fetch\x12\x18.kafka_lite.FetchRequest\x1a\x13.kafka_lite.Message0\x01\x12W\n" +
+	"\x0eInitPartitions\x12!.kafka_lite.InitPartitionsRequest\x1a\".kafka_lite.InitPartitionsResponse2\x8e\x04\n" +
+	"\vCoordinator\x12N\n" +
+	"\vCreateTopic\x12\x1e.kafka_lite.CreateTopicRequest\x1a\x1f.kafka_lite.CreateTopicResponse\x12H\n" +
 	"\vGetMetadata\x12\x1b.kafka_lite.MetadataRequest\x1a\x1c.kafka_lite.MetadataResponse\x12W\n" +
 	"\x0eRegisterBroker\x12!.kafka_lite.RegisterBrokerRequest\x1a\".kafka_lite.RegisterBrokerResponse\x12H\n" +
 	"\tJoinGroup\x12\x1c.kafka_lite.JoinGroupRequest\x1a\x1d.kafka_lite.JoinGroupResponse\x12T\n" +
-	"\rCommitOffsets\x12 .kafka_lite.CommitOffsetsRequest\x1a!.kafka_lite.CommitOffsetsResponseB=Z;github.com/thanhlongnt/kafka-lite/internal/proto/kafka_liteb\x06proto3"
+	"\rCommitOffsets\x12 .kafka_lite.CommitOffsetsRequest\x1a!.kafka_lite.CommitOffsetsResponse\x12l\n" +
+	"\x15UpdatePartitionLeader\x12(.kafka_lite.UpdatePartitionLeaderRequest\x1a).kafka_lite.UpdatePartitionLeaderResponseB=Z;github.com/thanhlongnt/kafka-lite/internal/proto/kafka_liteb\x06proto3"
 
 var (
 	file_kafka_lite_proto_rawDescOnce sync.Once
@@ -962,25 +1161,29 @@ func file_kafka_lite_proto_rawDescGZIP() []byte {
 	return file_kafka_lite_proto_rawDescData
 }
 
-var file_kafka_lite_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_kafka_lite_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_kafka_lite_proto_goTypes = []any{
-	(*Message)(nil),                // 0: kafka_lite.Message
-	(*TopicPartition)(nil),         // 1: kafka_lite.TopicPartition
-	(*CreateTopicRequest)(nil),     // 2: kafka_lite.CreateTopicRequest
-	(*CreateTopicResponse)(nil),    // 3: kafka_lite.CreateTopicResponse
-	(*ProduceRequest)(nil),         // 4: kafka_lite.ProduceRequest
-	(*ProduceResponse)(nil),        // 5: kafka_lite.ProduceResponse
-	(*FetchRequest)(nil),           // 6: kafka_lite.FetchRequest
-	(*MetadataRequest)(nil),        // 7: kafka_lite.MetadataRequest
-	(*PartitionInfo)(nil),          // 8: kafka_lite.PartitionInfo
-	(*MetadataResponse)(nil),       // 9: kafka_lite.MetadataResponse
-	(*RegisterBrokerRequest)(nil),  // 10: kafka_lite.RegisterBrokerRequest
-	(*RegisterBrokerResponse)(nil), // 11: kafka_lite.RegisterBrokerResponse
-	(*JoinGroupRequest)(nil),       // 12: kafka_lite.JoinGroupRequest
-	(*JoinGroupResponse)(nil),      // 13: kafka_lite.JoinGroupResponse
-	(*PartitionOffset)(nil),        // 14: kafka_lite.PartitionOffset
-	(*CommitOffsetsRequest)(nil),   // 15: kafka_lite.CommitOffsetsRequest
-	(*CommitOffsetsResponse)(nil),  // 16: kafka_lite.CommitOffsetsResponse
+	(*Message)(nil),                       // 0: kafka_lite.Message
+	(*TopicPartition)(nil),                // 1: kafka_lite.TopicPartition
+	(*CreateTopicRequest)(nil),            // 2: kafka_lite.CreateTopicRequest
+	(*CreateTopicResponse)(nil),           // 3: kafka_lite.CreateTopicResponse
+	(*ProduceRequest)(nil),                // 4: kafka_lite.ProduceRequest
+	(*ProduceResponse)(nil),               // 5: kafka_lite.ProduceResponse
+	(*FetchRequest)(nil),                  // 6: kafka_lite.FetchRequest
+	(*MetadataRequest)(nil),               // 7: kafka_lite.MetadataRequest
+	(*PartitionInfo)(nil),                 // 8: kafka_lite.PartitionInfo
+	(*MetadataResponse)(nil),              // 9: kafka_lite.MetadataResponse
+	(*RegisterBrokerRequest)(nil),         // 10: kafka_lite.RegisterBrokerRequest
+	(*RegisterBrokerResponse)(nil),        // 11: kafka_lite.RegisterBrokerResponse
+	(*JoinGroupRequest)(nil),              // 12: kafka_lite.JoinGroupRequest
+	(*JoinGroupResponse)(nil),             // 13: kafka_lite.JoinGroupResponse
+	(*PartitionOffset)(nil),               // 14: kafka_lite.PartitionOffset
+	(*CommitOffsetsRequest)(nil),          // 15: kafka_lite.CommitOffsetsRequest
+	(*CommitOffsetsResponse)(nil),         // 16: kafka_lite.CommitOffsetsResponse
+	(*UpdatePartitionLeaderRequest)(nil),  // 17: kafka_lite.UpdatePartitionLeaderRequest
+	(*UpdatePartitionLeaderResponse)(nil), // 18: kafka_lite.UpdatePartitionLeaderResponse
+	(*InitPartitionsRequest)(nil),         // 19: kafka_lite.InitPartitionsRequest
+	(*InitPartitionsResponse)(nil),        // 20: kafka_lite.InitPartitionsResponse
 }
 var file_kafka_lite_proto_depIdxs = []int32{
 	8,  // 0: kafka_lite.MetadataResponse.partitions:type_name -> kafka_lite.PartitionInfo
@@ -988,19 +1191,25 @@ var file_kafka_lite_proto_depIdxs = []int32{
 	2,  // 2: kafka_lite.Broker.CreateTopic:input_type -> kafka_lite.CreateTopicRequest
 	4,  // 3: kafka_lite.Broker.Produce:input_type -> kafka_lite.ProduceRequest
 	6,  // 4: kafka_lite.Broker.Fetch:input_type -> kafka_lite.FetchRequest
-	7,  // 5: kafka_lite.Coordinator.GetMetadata:input_type -> kafka_lite.MetadataRequest
-	10, // 6: kafka_lite.Coordinator.RegisterBroker:input_type -> kafka_lite.RegisterBrokerRequest
-	12, // 7: kafka_lite.Coordinator.JoinGroup:input_type -> kafka_lite.JoinGroupRequest
-	15, // 8: kafka_lite.Coordinator.CommitOffsets:input_type -> kafka_lite.CommitOffsetsRequest
-	3,  // 9: kafka_lite.Broker.CreateTopic:output_type -> kafka_lite.CreateTopicResponse
-	5,  // 10: kafka_lite.Broker.Produce:output_type -> kafka_lite.ProduceResponse
-	0,  // 11: kafka_lite.Broker.Fetch:output_type -> kafka_lite.Message
-	9,  // 12: kafka_lite.Coordinator.GetMetadata:output_type -> kafka_lite.MetadataResponse
-	11, // 13: kafka_lite.Coordinator.RegisterBroker:output_type -> kafka_lite.RegisterBrokerResponse
-	13, // 14: kafka_lite.Coordinator.JoinGroup:output_type -> kafka_lite.JoinGroupResponse
-	16, // 15: kafka_lite.Coordinator.CommitOffsets:output_type -> kafka_lite.CommitOffsetsResponse
-	9,  // [9:16] is the sub-list for method output_type
-	2,  // [2:9] is the sub-list for method input_type
+	19, // 5: kafka_lite.Broker.InitPartitions:input_type -> kafka_lite.InitPartitionsRequest
+	2,  // 6: kafka_lite.Coordinator.CreateTopic:input_type -> kafka_lite.CreateTopicRequest
+	7,  // 7: kafka_lite.Coordinator.GetMetadata:input_type -> kafka_lite.MetadataRequest
+	10, // 8: kafka_lite.Coordinator.RegisterBroker:input_type -> kafka_lite.RegisterBrokerRequest
+	12, // 9: kafka_lite.Coordinator.JoinGroup:input_type -> kafka_lite.JoinGroupRequest
+	15, // 10: kafka_lite.Coordinator.CommitOffsets:input_type -> kafka_lite.CommitOffsetsRequest
+	17, // 11: kafka_lite.Coordinator.UpdatePartitionLeader:input_type -> kafka_lite.UpdatePartitionLeaderRequest
+	3,  // 12: kafka_lite.Broker.CreateTopic:output_type -> kafka_lite.CreateTopicResponse
+	5,  // 13: kafka_lite.Broker.Produce:output_type -> kafka_lite.ProduceResponse
+	0,  // 14: kafka_lite.Broker.Fetch:output_type -> kafka_lite.Message
+	20, // 15: kafka_lite.Broker.InitPartitions:output_type -> kafka_lite.InitPartitionsResponse
+	3,  // 16: kafka_lite.Coordinator.CreateTopic:output_type -> kafka_lite.CreateTopicResponse
+	9,  // 17: kafka_lite.Coordinator.GetMetadata:output_type -> kafka_lite.MetadataResponse
+	11, // 18: kafka_lite.Coordinator.RegisterBroker:output_type -> kafka_lite.RegisterBrokerResponse
+	13, // 19: kafka_lite.Coordinator.JoinGroup:output_type -> kafka_lite.JoinGroupResponse
+	16, // 20: kafka_lite.Coordinator.CommitOffsets:output_type -> kafka_lite.CommitOffsetsResponse
+	18, // 21: kafka_lite.Coordinator.UpdatePartitionLeader:output_type -> kafka_lite.UpdatePartitionLeaderResponse
+	12, // [12:22] is the sub-list for method output_type
+	2,  // [2:12] is the sub-list for method input_type
 	2,  // [2:2] is the sub-list for extension type_name
 	2,  // [2:2] is the sub-list for extension extendee
 	0,  // [0:2] is the sub-list for field type_name
@@ -1017,7 +1226,7 @@ func file_kafka_lite_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kafka_lite_proto_rawDesc), len(file_kafka_lite_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
