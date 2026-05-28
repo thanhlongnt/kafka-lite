@@ -7,6 +7,7 @@ import (
 	"sort"
 	"sync"
 
+	kafkaraft "github.com/thanhlongnt/kafka-lite/internal/raft"
 	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -32,6 +33,7 @@ type coordinator struct {
 	brokersMu sync.Mutex
 	brokerConns map[string]pb.BrokerClient // addr -> client
 
+	raftNode *kafkaraft.Node
 	dialBroker func(ctx context.Context, addr string) (pb.BrokerClient, error) // for testing
 }
 
@@ -61,6 +63,12 @@ func New() *coordinator {
 // test package).
 func NewExported() *Coordinator { return New() }
 
+// NewWithRaft creates coordinator with Raft node as a parameter
+func NewWithRaft(raftNode *kafkaraft.Node) *coordinator {
+	c := New()
+	c.raftNode = raftNode
+	return c
+}
 // Test helper to set the broker dialer function.
 func (c *coordinator) SetBrokerDialer(fn func(ctx context.Context, addr string) (pb.BrokerClient, error)) {
 	c.dialBroker = fn
@@ -115,6 +123,10 @@ func (c *coordinator) CreateTopic(ctx context.Context, req *pb.CreateTopicReques
 	if req.Partitions <= 0 {
 		return nil, status.Error(codes.InvalidArgument, "partition count must be > 0")
 	}
+	if c.raftNode != nil && !c.raftNode.IsLeader() {
+		return nil, status.Errorf(codes.FailedPrecondition, "not the leader; redirect to %s", c.raftNode.LeaderAddr())
+	}
+
 
 	c.mu.Lock()
 	if _, exists := c.topics[req.Topic]; exists {
@@ -136,6 +148,19 @@ func (c *coordinator) CreateTopic(ctx context.Context, req *pb.CreateTopicReques
 	c.topics[req.Topic] = parts
 	c.mu.Unlock()
 
+	if c.raftNode != nil {
+		// persist new topic and partition thru raft
+		for _, p := range parts {
+			if err := c.raftNode.Apply(kafkaraft.Command{
+				Type: kafkaraft.CmdAssign,
+				Topic: req.Topic,
+				Partition: p.Partition,
+				Primary: p.BrokerAddr,
+			}); err != nil {
+				return nil, status.Errorf(codes.Internal, "raft apply: %v", err)
+			}
+		}
+	}
 	// Tell each broker which partition index it owns
 	c.initPartitions(ctx, req.Topic, parts)
 	return &pb.CreateTopicResponse{}, nil
@@ -143,6 +168,24 @@ func (c *coordinator) CreateTopic(ctx context.Context, req *pb.CreateTopicReques
 
 // GetMetadata -> called by producers 
 func (c *coordinator) GetMetadata(_ context.Context, req  *pb.MetadataRequest) (*pb.MetadataResponse, error) {
+	// If we're using Raft, read partition info from the FSM state. Otherwise, read from in-memory map.
+	if c.raftNode != nil {
+		byPart, ok := c.raftNode.FSM().GetTopic(req.Topic)
+		if !ok {
+			return nil, status.Errorf(codes.NotFound, "topic %q not found", req.Topic)
+		}
+		parts := make([]*pb.PartitionInfo, 0, len(byPart))
+		for idx, ps := range byPart {
+			parts = append(parts, &pb.PartitionInfo{
+				Partition: idx,
+				BrokerAddr: ps.Primary,
+			})
+		}
+		sort.Slice(parts, func(i, j int) bool {
+			return parts[i].Partition < parts[j].Partition
+		})
+		return &pb.MetadataResponse{Partitions: parts}, nil
+	}
 	c.mu.RLock()
 	parts, ok := c.topics[req.Topic]
 	c.mu.RUnlock()
@@ -196,6 +239,20 @@ func (c *coordinator) CommitOffsets(_ context.Context, req *pb.CommitOffsetsRequ
 func (c *coordinator) UpdatePartitionLeader(_ context.Context, req *pb.UpdatePartitionLeaderRequest) (*pb.UpdatePartitionLeaderResponse, error) {
 	if req.Topic == "" || req.BrokerAddr == "" {
 		return nil, status.Error(codes.InvalidArgument, "topic and broker_addr are required")
+	}
+	if c.raftNode != nil && !c.raftNode.IsLeader() {
+		return nil, status.Errorf(codes.FailedPrecondition, "not the leader; redirect to %s", c.raftNode.LeaderAddr())
+	}
+	if c.raftNode != nil {
+		// persist leader update thru raft
+		if err := c.raftNode.Apply(kafkaraft.Command{
+			Type: kafkaraft.CmdUpdateLeader,
+			Topic: req.Topic,
+			Partition: req.Partition,
+			Primary: req.BrokerAddr,
+		}); err != nil {
+			return nil, status.Errorf(codes.Internal, "raft apply: %v", err)
+		}
 	}
 
 	c.mu.Lock()

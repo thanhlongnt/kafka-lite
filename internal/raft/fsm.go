@@ -103,6 +103,19 @@ func (f *FSM) Get(topic string, partition int32) (PartitionState, bool) {
 	return ps, ok
 }
 
+//getTopic returns all partition states for a topic, keyed by partition index
+func (f *FSM) GetTopic(topic string) (map[int32]PartitionState, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	out := make(map[int32]PartitionState)
+	for k, v := range f.state {
+		if k.Topic == topic {
+			out[k.Partition] = v
+		}
+	}
+	return out, len(out) > 0
+}
 // fsmSnapshot implements raft.FSMSnapshot.
 type fsmSnapshot struct {
 	state map[partitionKey]PartitionState
