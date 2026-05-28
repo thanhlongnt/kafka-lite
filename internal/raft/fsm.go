@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"github.com/hashicorp/raft"
-	"golang.org/x/tools/go/analysis/passes/defers"
 )
 
 // CmdType identifies the kind of mutation to apply to the FSM.
