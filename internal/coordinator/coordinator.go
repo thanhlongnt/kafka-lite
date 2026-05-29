@@ -10,13 +10,13 @@ import (
 	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 type offsetKey struct {
-	groupID string
-	topic string
+	groupID   string
+	topic     string
 	partition int32
 }
 
@@ -24,12 +24,12 @@ type coordinator struct {
 	pb.UnimplementedCoordinatorServer
 
 	mu      sync.RWMutex
-	brokers []string // index-driven round robin
-	topics map[string][]*pb.PartitionInfo //topic -> [{parittion, broker_addr}, ...]
-	groups map[string]map[string][]int32 // group -> member -> partitions
-	offsets map[offsetKey]int64 // (groupID, topic, partition) -> offset
+	brokers []string                       // index-driven round robin
+	topics  map[string][]*pb.PartitionInfo //topic -> [{parittion, broker_addr}, ...]
+	groups  map[string]map[string][]int32  // group -> member -> partitions
+	offsets map[offsetKey]int64            // (groupID, topic, partition) -> offset
 
-	brokersMu sync.Mutex
+	brokersMu   sync.Mutex
 	brokerConns map[string]pb.BrokerClient // addr -> client
 
 	dialBroker func(ctx context.Context, addr string) (pb.BrokerClient, error) // for testing
@@ -41,9 +41,9 @@ type Coordinator = coordinator
 
 func New() *coordinator {
 	c := &coordinator{
-		topics: make(map[string][]*pb.PartitionInfo),
-		groups: make(map[string]map[string][]int32),
-		offsets: make(map[offsetKey]int64),
+		topics:      make(map[string][]*pb.PartitionInfo),
+		groups:      make(map[string]map[string][]int32),
+		offsets:     make(map[offsetKey]int64),
 		brokerConns: make(map[string]pb.BrokerClient),
 	}
 	c.dialBroker = func(_ context.Context, addr string) (pb.BrokerClient, error) {
@@ -129,7 +129,7 @@ func (c *coordinator) CreateTopic(ctx context.Context, req *pb.CreateTopicReques
 	parts := make([]*pb.PartitionInfo, req.Partitions)
 	for i := range parts {
 		parts[i] = &pb.PartitionInfo{
-			Partition: int32(i),
+			Partition:  int32(i),
 			BrokerAddr: c.brokers[i%len(c.brokers)],
 		}
 	}
@@ -141,8 +141,8 @@ func (c *coordinator) CreateTopic(ctx context.Context, req *pb.CreateTopicReques
 	return &pb.CreateTopicResponse{}, nil
 }
 
-// GetMetadata -> called by producers 
-func (c *coordinator) GetMetadata(_ context.Context, req  *pb.MetadataRequest) (*pb.MetadataResponse, error) {
+// GetMetadata -> called by producers
+func (c *coordinator) GetMetadata(_ context.Context, req *pb.MetadataRequest) (*pb.MetadataResponse, error) {
 	c.mu.RLock()
 	parts, ok := c.topics[req.Topic]
 	c.mu.RUnlock()
@@ -157,7 +157,7 @@ func (c *coordinator) JoinGroup(_ context.Context, req *pb.JoinGroupRequest) (*p
 	if req.GroupId == "" || req.MemberId == "" || req.Topic == "" {
 		return nil, status.Error(codes.InvalidArgument, "group_id, member_id, and topic are required")
 	}
-	
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -175,7 +175,7 @@ func (c *coordinator) JoinGroup(_ context.Context, req *pb.JoinGroupRequest) (*p
 	// Rebalance partitions among members
 	members := sortedKeys(group)
 	total := int32(len(parts))
-	for i, m := range(members) {
+	for i, m := range members {
 		group[m] = partitionRange(int32(i), int32(len(members)), total)
 	}
 	return &pb.JoinGroupResponse{AssignedPartitions: group[req.MemberId]}, nil
@@ -234,7 +234,7 @@ func (c *coordinator) initPartitions(ctx context.Context, topic string, parts []
 			continue // broker not registered, dial failed
 		}
 		_, _ = cl.InitPartitions(ctx, &pb.InitPartitionsRequest{
-			Topic: topic,
+			Topic:      topic,
 			Partitions: partitionIDs,
 		})
 	}

@@ -3,11 +3,11 @@ package producer
 import (
 	"context"
 	"fmt"
-	"hash/fnv"
-	"sync"
 	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"hash/fnv"
+	"sync"
 )
 
 // Producer sends messages to a single broker. Phase 1 — no partition routing;
@@ -17,10 +17,10 @@ type Producer struct {
 	conn   *grpc.ClientConn
 
 	// Phase 2: Coordinator client and cached metadata for partition routing.
-	coordClient pb.CoordinatorClient
-	metaCache map[string][]*pb.PartitionInfo // topic -> [{partition, broker_addr}, ...]
-	brokerClients map[string]pb.BrokerClient // broker_addr -> client
-	mu sync.RWMutex // protects metaCache and brokerClients
+	coordClient   pb.CoordinatorClient
+	metaCache     map[string][]*pb.PartitionInfo // topic -> [{partition, broker_addr}, ...]
+	brokerClients map[string]pb.BrokerClient     // broker_addr -> client
+	mu            sync.RWMutex                   // protects metaCache and brokerClients
 
 	dialBroker func(ctx context.Context, addr string) (pb.BrokerClient, error) // for testing
 }
@@ -35,6 +35,7 @@ func New(brokerAddr string, opts ...grpc.DialOption) (*Producer, error) {
 	}
 	return &Producer{client: pb.NewBrokerClient(conn), conn: conn}, nil
 }
+
 // ConnectCoordinator creates a coordinator client over broker -> broker exposes a proxy
 func (p *Producer) ConnectCoordinator() {
 	p.coordClient = pb.NewCoordinatorClient(p.conn)
@@ -48,12 +49,11 @@ func (p *Producer) ConnectCoordinator() {
 		return pb.NewBrokerClient(conn), nil
 	}
 }
+
 // SetDialer used to open connections to partition owners
 func (p *Producer) SetDialer(fn func(ctx context.Context, addr string) (pb.BrokerClient, error)) {
 	p.dialBroker = fn
 }
-
-
 
 // Send appends a message to topic/partition and returns the committed offset.
 func (p *Producer) Send(ctx context.Context, topic string, partition int32, key, value []byte) (int64, error) {
@@ -71,7 +71,7 @@ func (p *Producer) Send(ctx context.Context, topic string, partition int32, key,
 
 // Route selects partition by hashing key, routes to broker that owns it, and returns chosen partition and offset.
 func (p *Producer) Route(ctx context.Context, topic string, key, value []byte) (int32, int64, error) {
-	parts, err := p.metadata(ctx, topic) 
+	parts, err := p.metadata(ctx, topic)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -91,6 +91,7 @@ func (p *Producer) Route(ctx context.Context, topic string, key, value []byte) (
 	}
 	return partition, resp.Offset, nil
 }
+
 // Close releases the underlying gRPC connection.
 func (p *Producer) Close() error {
 	return p.conn.Close()

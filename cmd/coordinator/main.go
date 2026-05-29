@@ -2,8 +2,8 @@ package main
 
 import (
 	"flag"
-	"log"
 	"github.com/thanhlongnt/kafka-lite/internal/coordinator"
+	"log"
 )
 
 func main() {
