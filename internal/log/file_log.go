@@ -123,6 +123,43 @@ func (fl *FileLog) Append(msg *pb.Message) (int64, error) {
 	return offset, nil
 }
 
+// AppendReplica appends a message exactly at the offset specified in the message.
+func (fl *FileLog) AppendReplica(msg *pb.Message) error {
+	fl.mu.Lock()
+	defer fl.mu.Unlock()
+
+	offset := int64(len(fl.index))
+	if msg.Offset != offset {
+		return fmt.Errorf("replica offset mismatch: expected %d, got %d", offset, msg.Offset)
+	}
+
+	data, err := json.Marshal(messageRecord{
+		Topic:     msg.Topic,
+		Partition: msg.Partition,
+		Key:       msg.Key,
+		Value:     msg.Value,
+		Offset:    msg.Offset,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+
+	pos, err := fl.file.Seek(0, io.SeekEnd)
+	if err != nil {
+		return fmt.Errorf("seek end: %w", err)
+	}
+
+	if err := binary.Write(fl.file, binary.LittleEndian, uint32(len(data))); err != nil {
+		return fmt.Errorf("write length: %w", err)
+	}
+	if _, err := fl.file.Write(data); err != nil {
+		return fmt.Errorf("write data: %w", err)
+	}
+
+	fl.index = append(fl.index, pos)
+	return nil
+}
+
 // Read returns up to maxMsgs messages starting at offset.
 func (fl *FileLog) Read(offset int64, maxMsgs int) ([]*pb.Message, error) {
 	fl.mu.RLock()
@@ -180,6 +217,40 @@ func (fl *FileLog) Len() int64 {
 	fl.mu.RLock()
 	defer fl.mu.RUnlock()
 	return int64(len(fl.index))
+}
+
+// LogEndOffset returns the next available offset to be appended.
+func (fl *FileLog) LogEndOffset() int64 {
+	return fl.Len()
+}
+
+// TruncateTo truncates the log to the specified offset, discarding all messages at and after it.
+func (fl *FileLog) TruncateTo(offset int64) error {
+	fl.mu.Lock()
+	defer fl.mu.Unlock()
+
+	n := int64(len(fl.index))
+	if offset < 0 || offset > n {
+		return fmt.Errorf("truncate offset %d out of range [0, %d]", offset, n)
+	}
+
+	pos := int64(0)
+	if offset < n {
+		pos = fl.index[offset]
+	} else {
+		var err error
+		pos, err = fl.file.Seek(0, io.SeekEnd)
+		if err != nil {
+			return fmt.Errorf("seek to end: %w", err)
+		}
+	}
+
+	if err := fl.file.Truncate(pos); err != nil {
+		return fmt.Errorf("truncate file: %w", err)
+	}
+
+	fl.index = fl.index[:offset]
+	return nil
 }
 
 // Close closes the underlying segment file.

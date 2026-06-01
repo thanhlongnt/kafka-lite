@@ -16,17 +16,18 @@ func main() {
 	dataDir := flag.String("data-dir", "", "directory for persistent log segments (omit for in-memory)")
 	advertise := flag.String("advertise", "", "address to advertise to coordinator (defaults to localhost+port of -addr)")
 	coordAddr := flag.String("coordinator", "", "coordinator gRPC address (phase 2, optional)")
+	id := flag.Int("id", 1, "integer ID of this broker")
 	flag.Parse()
 
 	var b *broker.Broker
 	if *dataDir != "" {
 		var err error
-		b, err = broker.NewWithDataDir(*dataDir)
+		b, err = broker.NewWithDataDir(int32(*id), *dataDir)
 		if err != nil {
 			log.Fatalf("broker: %v", err)
 		}
 	} else {
-		b = broker.New()
+		b = broker.New(int32(*id))
 	}
 
 	if *coordAddr != "" {

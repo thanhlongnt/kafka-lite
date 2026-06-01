@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/thanhlongnt/kafka-lite/internal/consumer"
-	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
 	"github.com/thanhlongnt/kafka-lite/internal/producer"
+	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
 	"github.com/thanhlongnt/kafka-lite/internal/testutil"
 	"google.golang.org/grpc"
 )
@@ -16,7 +16,7 @@ import (
 // phase1Env spins up a broker and returns factory functions for producers/consumers
 // and a direct broker client for setup.
 type phase1Env struct {
-	client     pb.BrokerClient
+	client      pb.BrokerClient
 	newProducer func() *producer.Producer
 	newConsumer func(topic string, partition int32, startOffset int64) *consumer.Consumer
 }

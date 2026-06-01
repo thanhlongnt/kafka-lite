@@ -24,23 +24,35 @@ type Broker struct {
 	mu      sync.RWMutex
 	topics  map[string]map[int32]*Partition // sparse: only partitions this broker owns
 	dataDir string                          // empty → in-memory logs; non-empty → file-backed logs
+	id      int32                           // Broker ID
+
+	peerClients map[int32]pb.BrokerClient
+	peerConns   map[int32]*grpc.ClientConn
 
 	coordClient pb.CoordinatorClient
 	coordConn   *grpc.ClientConn
 }
 
 // New returns a Broker that stores all messages in memory.
-func New() *Broker {
-	return &Broker{topics: make(map[string]map[int32]*Partition)}
+func New(id int32) *Broker {
+	return &Broker{
+		topics:      make(map[string]map[int32]*Partition),
+		id:          id,
+		peerClients: make(map[int32]pb.BrokerClient),
+		peerConns:   make(map[int32]*grpc.ClientConn),
+	}
 }
 
 // NewWithDataDir returns a Broker that persists each partition's log under
 // dataDir/<topic>/<partition>/. Existing topics and partitions are restored
 // automatically by scanning dataDir on startup.
-func NewWithDataDir(dataDir string) (*Broker, error) {
+func NewWithDataDir(id int32, dataDir string) (*Broker, error) {
 	b := &Broker{
-		topics:  make(map[string]map[int32]*Partition),
-		dataDir: dataDir,
+		topics:      make(map[string]map[int32]*Partition),
+		dataDir:     dataDir,
+		id:          id,
+		peerClients: make(map[int32]pb.BrokerClient),
+		peerConns:   make(map[int32]*grpc.ClientConn),
 	}
 	if err := b.restore(); err != nil {
 		return nil, fmt.Errorf("restore from %s: %w", dataDir, err)
@@ -98,7 +110,7 @@ func (b *Broker) restore() error {
 			if err != nil {
 				return fmt.Errorf("open log %s: %w", pe.dir, err)
 			}
-			partitions[int32(pe.idx)] = newPartition(fl)
+			partitions[int32(pe.idx)] = newPartition(topic, int32(pe.idx), fl, b)
 		}
 		b.topics[topic] = partitions
 	}
@@ -151,7 +163,7 @@ func (b *Broker) CreateTopic(_ context.Context, req *pb.CreateTopicRequest) (*pb
 		} else {
 			l = &log.MemLog{}
 		}
-		parts[i] = newPartition(l)
+		parts[i] = newPartition(req.Topic, int32(i), l, b)
 	}
 	b.topics[req.Topic] = parts
 	return &pb.CreateTopicResponse{}, nil
@@ -182,7 +194,7 @@ func (b *Broker) InitPartitions(_ context.Context, req *pb.InitPartitionsRequest
 			} else {
 				l = &log.MemLog{}
 			}
-			b.topics[req.Topic][pid] = newPartition(l)
+			b.topics[req.Topic][pid] = newPartition(req.Topic, pid, l, b)
 		}
 	}
 	return &pb.InitPartitionsResponse{}, nil
@@ -239,8 +251,48 @@ func (b *Broker) Fetch(req *pb.FetchRequest, stream pb.Broker_FetchServer) error
 			continue
 		}
 
-		// No message at offset yet — block until one arrives or client cancels.
-		// WaitForData waits until Len() > offset (i.e. message at offset exists).
+		// Block until HW advances or client cancels.
+		p.WaitForHW(ctx, offset)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
+}
+
+func (b *Broker) FetchReplica(req *pb.FetchReplicaRequest, stream pb.Broker_FetchReplicaServer) error {
+	p, err := b.getPartition(req.Topic, req.Partition)
+	if err != nil {
+		return err
+	}
+
+	p.updateReplicaState(req.ReplicaId, req.FetchOffset)
+
+	ctx := stream.Context()
+	offset := req.FetchOffset
+	const batchSize = 64
+
+	for {
+		msgs, err := p.ReadReplica(offset, batchSize)
+		if err != nil {
+			return status.Errorf(codes.Internal, "read failed: %v", err)
+		}
+
+		for _, msg := range msgs {
+			if err := stream.Send(&pb.ReplicaRecord{
+				Message:       msg,
+				HighWatermark: p.HW(),
+				LeaderEpoch:   p.LeaderEpoch(),
+			}); err != nil {
+				return err
+			}
+			offset++
+		}
+
+		if len(msgs) > 0 {
+			p.updateReplicaState(req.ReplicaId, offset)
+			continue
+		}
+
 		p.WaitForData(ctx, offset)
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -260,6 +312,10 @@ func (b *Broker) Serve(addr string) error {
 	pb.RegisterBrokerServer(srv, b)
 	if b.coordClient != nil {
 		pb.RegisterCoordinatorServer(srv, &coordinatorProxy{client: b.coordClient})
+
+		// TODO: [Controller/Metadata] When the broker connects to the coordinator,
+		// it should fetch the initial cluster metadata (broker directory, partitions, ISRs)
+		// so it knows which partitions to spin up and which peer connections to open.
 	}
 	return srv.Serve(lis)
 }
@@ -297,4 +353,47 @@ func (p *coordinatorProxy) CommitOffsets(ctx context.Context, req *pb.CommitOffs
 
 func (p *coordinatorProxy) GetMetadata(ctx context.Context, req *pb.MetadataRequest) (*pb.MetadataResponse, error) {
 	return p.client.GetMetadata(ctx, req)
+}
+
+// ConnectToPeer dials a peer broker and caches the gRPC client for replication.
+func (b *Broker) ConnectToPeer(peerID int32, addr string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Skip if already connected
+	if _, exists := b.peerClients[peerID]; exists {
+		return nil
+	}
+
+	// Dial the peer broker
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("failed to dial peer %d at %s: %w", peerID, addr, err)
+	}
+
+	// Cache the raw connection for teardown and the stub for replication
+	b.peerConns[peerID] = conn
+	b.peerClients[peerID] = pb.NewBrokerClient(conn)
+
+	return nil
+}
+
+// Close strictly tears down all peer connections and local partitions.
+func (b *Broker) Close() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	for _, conn := range b.peerConns {
+		conn.Close()
+	}
+
+	for _, parts := range b.topics {
+		for _, p := range parts {
+			p.Close()
+		}
+	}
+
+	if b.coordConn != nil {
+		b.coordConn.Close()
+	}
 }

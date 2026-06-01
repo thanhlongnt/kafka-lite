@@ -25,6 +25,7 @@ service Broker {
   rpc CreateTopic(CreateTopicRequest) returns (CreateTopicResponse);
   rpc Produce(ProduceRequest)         returns (ProduceResponse);
   rpc Fetch(FetchRequest)             returns (stream Message);
+  rpc FetchReplica(FetchReplicaRequest) returns (stream ReplicaRecord);
   rpc InitPartitions(InitPartitionsRequest) returns (InitPartitionsResponse);
 }
 
@@ -52,6 +53,20 @@ message FetchRequest {
   string topic       = 1;
   int32  partition   = 2;
   int64  start_offset = 3;
+}
+
+message FetchReplicaRequest {
+  string topic        = 1;
+  int32  partition    = 2;
+  int64  fetch_offset = 3;
+  int32  replica_id   = 4;
+  int64  leader_epoch = 5;
+}
+
+message ReplicaRecord {
+  Message message       = 1;
+  int64 high_watermark  = 2;
+  int64 leader_epoch    = 3;
 }
 
 // ── Coordinator service (Phase 2) ─────────────────────────────────────────────

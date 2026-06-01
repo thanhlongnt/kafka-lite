@@ -2,10 +2,9 @@ package main
 
 import (
 	"flag"
-	"log"
-
-	"github.com/hashicorp/raft"
 	"github.com/thanhlongnt/kafka-lite/internal/coordinator"
+	"log"
+	"github.com/hashicorp/raft"
 	kafkaraft "github.com/thanhlongnt/kafka-lite/internal/raft"
 )
 
