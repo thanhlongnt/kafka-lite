@@ -52,7 +52,8 @@ func newPhase2Env(t *testing.T) *phase2Env {
 	coord.SetBrokerDialer(brokerDialer)
 
 	srv := grpc.NewServer()
-	pb.RegisterBrokerServer(srv, broker.New())
+	// using default id = 1
+	pb.RegisterBrokerServer(srv, broker.New(1))
 	pb.RegisterCoordinatorServer(srv, coord)
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(func() { srv.Stop(); lis.Close() })
@@ -217,7 +218,8 @@ func newRoutingEnv(t *testing.T) *routingEnv {
 	for addr, lis := range listeners {
 		lis, addr := lis, addr // capture
 		srv := grpc.NewServer()
-		pb.RegisterBrokerServer(srv, broker.New())
+		// using default id = 1
+		pb.RegisterBrokerServer(srv, broker.New(1))
 		if addr == routingAddrA {
 			pb.RegisterCoordinatorServer(srv, coord)
 		}

@@ -26,7 +26,8 @@ func newTestServer(t *testing.T) pb.BrokerClient {
 
 func newTestServerWithDataDir(t *testing.T, dataDir string) (pb.BrokerClient, func()) {
 	t.Helper()
-	b, err := broker.NewWithDataDir(dataDir)
+	// passing default id = 1
+	b, err := broker.NewWithDataDir(1, dataDir)
 	if err != nil {
 		t.Fatalf("NewWithDataDir: %v", err)
 	}
