@@ -61,6 +61,7 @@ func newPartition(topic string, id int32, l log.Log, b *Broker) *Partition {
 		id:       id,
 		log:      l,
 		role:     Leader, // Defaults to Leader; Controller coordinate transitions
+		hw:       l.LogEndOffset(), // Start with HW at end of log so empty partition is immediately readable
 		replicas: make(map[int32]*ReplicaState),
 		notifyCh: make(chan struct{}),
 		broker:   b,
@@ -262,6 +263,12 @@ func (p *Partition) Append(msg *pb.Message) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	// if no replicas, hw should advance immediately to make the message visible to consumers
+	p.mu.Lock()
+	if len(p.replicas) == 0 {
+		p.hw = p.log.LogEndOffset()
+	}
+	p.mu.Unlock()
 	p.cond.Broadcast()
 	return offset, nil
 }
