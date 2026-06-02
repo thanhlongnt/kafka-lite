@@ -23,6 +23,7 @@ type Command struct {
 	Partition int32
 	Primary   string
 	Backups   []string
+	Epoch     int64
 }
 
 type partitionKey struct {
@@ -34,6 +35,7 @@ type partitionKey struct {
 type PartitionState struct {
 	Primary string
 	Backups []string
+	Epoch   int64
 }
 
 // FSM implements raft.FSM and maintains the partition assignment state.
@@ -61,10 +63,12 @@ func (f *FSM) Apply(l *raft.Log) interface{} {
 
 	switch cmd.Type {
 	case CmdAssign:
-		f.state[key] = PartitionState{Primary: cmd.Primary, Backups: cmd.Backups}
+		f.state[key] = PartitionState{Primary: cmd.Primary, Backups: cmd.Backups, Epoch: cmd.Epoch}
 	case CmdUpdateLeader:
 		existing := f.state[key]
 		existing.Primary = cmd.Primary
+		existing.Backups = cmd.Backups
+		existing.Epoch = cmd.Epoch
 		f.state[key] = existing
 	}
 	return nil

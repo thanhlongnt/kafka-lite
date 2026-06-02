@@ -2,6 +2,7 @@ package broker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -215,6 +216,9 @@ func (b *Broker) Produce(_ context.Context, req *pb.ProduceRequest) (*pb.Produce
 	}
 	offset, err := p.Append(msg)
 	if err != nil {
+		if errors.Is(err, ErrNotLeader) {
+			return nil, status.Errorf(codes.FailedPrecondition, "not leader for partition %d", req.Partition)
+		}
 		return nil, status.Errorf(codes.Internal, "append failed: %v", err)
 	}
 	return &pb.ProduceResponse{Offset: offset}, nil
@@ -298,6 +302,28 @@ func (b *Broker) FetchReplica(req *pb.FetchReplicaRequest, stream pb.Broker_Fetc
 			return ctx.Err()
 		}
 	}
+}
+
+// AssignRole is called by the coordinator to make this broker the leader or a
+// follower for the given partition. For FOLLOWER, the broker first dials the
+// leader peer if not already connected.
+func (b *Broker) AssignRole(_ context.Context, req *pb.AssignRoleRequest) (*pb.AssignRoleResponse, error) {
+	p, err := b.getPartition(req.Topic, req.Partition)
+	if err != nil {
+		return nil, err
+	}
+	switch req.Role {
+	case pb.ReplicaRole_LEADER:
+		p.BecomeLeader(req.Epoch)
+	case pb.ReplicaRole_FOLLOWER:
+		if err := b.ConnectToPeer(req.LeaderId, req.LeaderAddr); err != nil {
+			return nil, status.Errorf(codes.Internal, "connect to leader peer: %v", err)
+		}
+		p.BecomeFollower(req.LeaderId, req.Epoch)
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "unknown role %v", req.Role)
+	}
+	return &pb.AssignRoleResponse{}, nil
 }
 
 // Serve starts the gRPC server on addr and blocks until it exits.

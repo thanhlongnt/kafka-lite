@@ -2,13 +2,16 @@ package broker
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/thanhlongnt/kafka-lite/internal/log"
 	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
 )
+
+// ErrNotLeader is returned by Append when this broker is not the partition leader.
+var ErrNotLeader = errors.New("not leader for partition")
 
 // ReplicaRole represents the role of a replica for a given partition.
 type ReplicaRole int
@@ -255,7 +258,7 @@ func (p *Partition) Append(msg *pb.Message) (int64, error) {
 	p.mu.RLock()
 	if p.role != Leader {
 		p.mu.RUnlock()
-		return 0, fmt.Errorf("not leader for partition")
+		return 0, ErrNotLeader
 	}
 	p.mu.RUnlock()
 

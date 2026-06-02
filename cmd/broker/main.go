@@ -44,7 +44,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("dial coordinator for registration: %v", err)
 		}
-		_, err = pb.NewCoordinatorClient(conn).RegisterBroker(context.Background(), &pb.RegisterBrokerRequest{Addr: registerAddr})
+		_, err = pb.NewCoordinatorClient(conn).RegisterBroker(context.Background(), &pb.RegisterBrokerRequest{Addr: registerAddr, Id: int32(*id)})
 		conn.Close()
 		if err != nil {
 			log.Fatalf("register with coordinator: %v", err)
