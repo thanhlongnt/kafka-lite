@@ -137,7 +137,8 @@ func (c *coordinator) CreateTopic(ctx context.Context, req *pb.CreateTopicReques
 		c.mu.Unlock()
 		return nil, status.Error(codes.FailedPrecondition, "no brokers registered")
 	}
-
+	brokers := make([]string, len(c.brokers)) // snapshot before unclocking
+	copy(brokers, c.brokers)
 	parts := make([]*pb.PartitionInfo, req.Partitions)
 	for i := range parts {
 		parts[i] = &pb.PartitionInfo{
@@ -156,6 +157,7 @@ func (c *coordinator) CreateTopic(ctx context.Context, req *pb.CreateTopicReques
 				Topic: req.Topic,
 				Partition: p.Partition,
 				Primary: p.BrokerAddr,
+				Backups: selectBackups(brokers, p.BrokerAddr, len(brokers) - 1),
 			}); err != nil {
 				return nil, status.Errorf(codes.Internal, "raft apply: %v", err)
 			}
@@ -328,4 +330,18 @@ func min32(a, b int32) int32 {
 		return a
 	}
 	return b
+}
+
+// selectBackups picks n backup brokers from the list (excluding primary)
+func selectBackups(brokers []string, primary string, n int) []string {
+	backups := make([]string, 0, n)
+	for _, b := range brokers {
+		if len(backups) == n {
+			break
+		}
+		if b != primary {
+			backups = append(backups, b)
+		}
+	}
+	return backups
 }
