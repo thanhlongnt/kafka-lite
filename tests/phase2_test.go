@@ -327,8 +327,12 @@ func TestPhase2_PartitionRouting(t *testing.T) {
 						t.Errorf("broker %s p%d (owner): unexpected error: %v", addr, p, err)
 					}
 				} else {
-					if status.Code(err) != codes.NotFound {
-						t.Errorf("broker %s p%d (non-owner): expected NotFound, got %v", addr, p, err)
+					// NotFound  → broker has no knowledge of the partition.
+					// FailedPrecondition → broker holds a follower replica but is not the leader.
+					// Both are valid non-primary responses.
+					code := status.Code(err)
+					if code != codes.NotFound && code != codes.FailedPrecondition {
+						t.Errorf("broker %s p%d (non-owner): expected NotFound or FailedPrecondition, got %v", addr, p, err)
 					}
 				}
 			}

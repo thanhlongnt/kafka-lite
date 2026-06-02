@@ -14,6 +14,7 @@ type CmdType uint8
 const (
 	CmdAssign      CmdType = iota // initial partition assignment
 	CmdUpdateLeader               // leader changed after failover
+	CmdUpdateISR                  // ISR membership changed (reported by leader broker)
 )
 
 // Command is serialized as JSON into raft.Log.Data.
@@ -23,6 +24,8 @@ type Command struct {
 	Partition int32
 	Primary   string
 	Backups   []string
+	Epoch     int64
+	ISR       []int32 // broker IDs currently in sync (CmdUpdateISR)
 }
 
 type partitionKey struct {
@@ -34,6 +37,8 @@ type partitionKey struct {
 type PartitionState struct {
 	Primary string
 	Backups []string
+	Epoch   int64
+	ISR     []int32 // broker IDs currently in sync; nil means all backups are assumed in sync
 }
 
 // FSM implements raft.FSM and maintains the partition assignment state.
@@ -61,11 +66,19 @@ func (f *FSM) Apply(l *raft.Log) interface{} {
 
 	switch cmd.Type {
 	case CmdAssign:
-		f.state[key] = PartitionState{Primary: cmd.Primary, Backups: cmd.Backups}
+		f.state[key] = PartitionState{Primary: cmd.Primary, Backups: cmd.Backups, Epoch: cmd.Epoch}
 	case CmdUpdateLeader:
 		existing := f.state[key]
 		existing.Primary = cmd.Primary
+		existing.Backups = cmd.Backups
+		existing.Epoch = cmd.Epoch
 		f.state[key] = existing
+	case CmdUpdateISR:
+		existing := f.state[key]
+		if cmd.Epoch >= existing.Epoch {
+			existing.ISR = cmd.ISR
+			f.state[key] = existing
+		}
 	}
 	return nil
 }
