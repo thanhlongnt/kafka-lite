@@ -36,12 +36,13 @@ enum ReplicaRole {
 }
 
 message AssignRoleRequest {
-  string      topic       = 1;
-  int32       partition   = 2;
-  ReplicaRole role        = 3;
-  int64       epoch       = 4;
-  int32       leader_id   = 5;
-  string      leader_addr = 6;
+  string          topic       = 1;
+  int32           partition   = 2;
+  ReplicaRole     role        = 3;
+  int64           epoch       = 4;
+  int32           leader_id   = 5;
+  string          leader_addr = 6;
+  repeated int32  isr_ids     = 7; // initial ISR broker IDs (LEADER role only)
 }
 message AssignRoleResponse {}
 
@@ -94,6 +95,7 @@ service Coordinator {
   rpc JoinGroup(JoinGroupRequest)           returns (JoinGroupResponse);
   rpc CommitOffsets(CommitOffsetsRequest)   returns (CommitOffsetsResponse);
   rpc UpdatePartitionLeader(UpdatePartitionLeaderRequest) returns (UpdatePartitionLeaderResponse);
+  rpc AlterIsr(AlterIsrRequest) returns (AlterIsrResponse);
 }
 
 message MetadataRequest {
@@ -145,6 +147,14 @@ message UpdatePartitionLeaderRequest {
   string broker_addr = 3;
 }
 message UpdatePartitionLeaderResponse {}
+
+message AlterIsrRequest {
+  string          topic     = 1;
+  int32           partition = 2;
+  int64           epoch     = 3;
+  repeated int32  isr_ids   = 4; // broker IDs currently in sync
+}
+message AlterIsrResponse {}
 
 message InitPartitionsRequest {
   string topic = 1;

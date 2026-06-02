@@ -24,12 +24,13 @@ type offsetKey struct {
 type coordinator struct {
 	pb.UnimplementedCoordinatorServer
 
-	mu      sync.RWMutex
-	brokers   []string                       // index-driven round robin
-	brokerIDs map[string]int32               // addr -> broker ID
-	topics    map[string][]*pb.PartitionInfo // topic -> [{partition, broker_addr}, ...]
-	groups    map[string]map[string][]int32  // group -> member -> partitions
-	offsets   map[offsetKey]int64            // (groupID, topic, partition) -> offset
+	mu         sync.RWMutex
+	brokers    []string                       // index-driven round robin
+	brokerIDs  map[string]int32               // addr -> broker ID
+	brokerAddrs map[int32]string              // broker ID -> addr (reverse of brokerIDs)
+	topics     map[string][]*pb.PartitionInfo // topic -> [{partition, broker_addr}, ...]
+	groups     map[string]map[string][]int32  // group -> member -> partitions
+	offsets    map[offsetKey]int64            // (groupID, topic, partition) -> offset
 
 	brokersMu   sync.Mutex
 	brokerConns map[string]pb.BrokerClient // addr -> client
@@ -52,6 +53,7 @@ type Coordinator = coordinator
 func New() *coordinator {
 	c := &coordinator{
 		brokerIDs:   make(map[string]int32),
+		brokerAddrs: make(map[int32]string),
 		topics:      make(map[string][]*pb.PartitionInfo),
 		groups:      make(map[string]map[string][]int32),
 		offsets:     make(map[offsetKey]int64),
@@ -109,6 +111,7 @@ func (c *coordinator) RegisterBroker(ctx context.Context, req *pb.RegisterBroker
 	}
 	c.brokers = append(c.brokers, req.Addr)
 	c.brokerIDs[req.Addr] = req.Id
+	c.brokerAddrs[req.Id] = req.Addr
 	c.mu.Unlock()
 
 	// Open connection to broker
@@ -325,6 +328,33 @@ func (c *coordinator) UpdatePartitionLeader(ctx context.Context, req *pb.UpdateP
 	return &pb.UpdatePartitionLeaderResponse{}, nil
 }
 
+// AlterIsr is called by the partition leader to persist an ISR change through Raft.
+// Stale updates (epoch < current) are silently ignored.
+func (c *coordinator) AlterIsr(_ context.Context, req *pb.AlterIsrRequest) (*pb.AlterIsrResponse, error) {
+	if req.Topic == "" {
+		return nil, status.Error(codes.InvalidArgument, "topic is required")
+	}
+	if c.raftNode != nil && !c.raftNode.IsLeader() {
+		return nil, status.Errorf(codes.FailedPrecondition, "not the raft leader; redirect to %s", c.raftNode.LeaderAddr())
+	}
+	if c.raftNode != nil {
+		if ps, ok := c.raftNode.FSM().Get(req.Topic, req.Partition); ok && req.Epoch < ps.Epoch {
+			// Stale report — ignore without error so the broker doesn't retry in a loop.
+			return &pb.AlterIsrResponse{}, nil
+		}
+		if err := c.raftNode.Apply(kafkaraft.Command{
+			Type:      kafkaraft.CmdUpdateISR,
+			Topic:     req.Topic,
+			Partition: req.Partition,
+			Epoch:     req.Epoch,
+			ISR:       req.IsrIds,
+		}); err != nil {
+			return nil, status.Errorf(codes.Internal, "raft apply: %v", err)
+		}
+	}
+	return &pb.AlterIsrResponse{}, nil
+}
+
 // Helpers
 
 // brokerClient returns the cached gRPC client for addr, or nil if not connected.
@@ -353,17 +383,30 @@ func (c *coordinator) initBackupPartitions(ctx context.Context, topic string, as
 }
 
 // assignLeaderRoles sends AssignRole(LEADER) to each primary broker.
+// The backup broker IDs are passed as the initial ISR so the leader pre-populates
+// its replica state and waits for them to catch up before advancing the HW.
 func (c *coordinator) assignLeaderRoles(ctx context.Context, topic string, assignments []partitionAssignment, epoch int64) {
+	c.mu.RLock()
+	brokerIDs := c.brokerIDs
+	c.mu.RUnlock()
+
 	for _, a := range assignments {
 		cl := c.brokerClient(a.primary)
 		if cl == nil {
 			continue
+		}
+		isrIDs := make([]int32, 0, len(a.backups))
+		for _, addr := range a.backups {
+			if id, ok := brokerIDs[addr]; ok {
+				isrIDs = append(isrIDs, id)
+			}
 		}
 		_, _ = cl.AssignRole(ctx, &pb.AssignRoleRequest{
 			Topic:     topic,
 			Partition: a.partition,
 			Role:      pb.ReplicaRole_LEADER,
 			Epoch:     epoch,
+			IsrIds:    isrIDs,
 		})
 	}
 }

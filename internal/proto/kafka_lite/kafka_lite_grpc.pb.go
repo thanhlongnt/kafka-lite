@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             v7.35.0
-// source: proto/kafka_lite.proto
+// source: kafka_lite.proto
 
 package kafka_lite
 
@@ -314,7 +314,7 @@ var Broker_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "proto/kafka_lite.proto",
+	Metadata: "kafka_lite.proto",
 }
 
 const (
@@ -324,6 +324,7 @@ const (
 	Coordinator_JoinGroup_FullMethodName             = "/kafka_lite.Coordinator/JoinGroup"
 	Coordinator_CommitOffsets_FullMethodName         = "/kafka_lite.Coordinator/CommitOffsets"
 	Coordinator_UpdatePartitionLeader_FullMethodName = "/kafka_lite.Coordinator/UpdatePartitionLeader"
+	Coordinator_AlterIsr_FullMethodName              = "/kafka_lite.Coordinator/AlterIsr"
 )
 
 // CoordinatorClient is the client API for Coordinator service.
@@ -336,6 +337,7 @@ type CoordinatorClient interface {
 	JoinGroup(ctx context.Context, in *JoinGroupRequest, opts ...grpc.CallOption) (*JoinGroupResponse, error)
 	CommitOffsets(ctx context.Context, in *CommitOffsetsRequest, opts ...grpc.CallOption) (*CommitOffsetsResponse, error)
 	UpdatePartitionLeader(ctx context.Context, in *UpdatePartitionLeaderRequest, opts ...grpc.CallOption) (*UpdatePartitionLeaderResponse, error)
+	AlterIsr(ctx context.Context, in *AlterIsrRequest, opts ...grpc.CallOption) (*AlterIsrResponse, error)
 }
 
 type coordinatorClient struct {
@@ -406,6 +408,16 @@ func (c *coordinatorClient) UpdatePartitionLeader(ctx context.Context, in *Updat
 	return out, nil
 }
 
+func (c *coordinatorClient) AlterIsr(ctx context.Context, in *AlterIsrRequest, opts ...grpc.CallOption) (*AlterIsrResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AlterIsrResponse)
+	err := c.cc.Invoke(ctx, Coordinator_AlterIsr_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CoordinatorServer is the server API for Coordinator service.
 // All implementations must embed UnimplementedCoordinatorServer
 // for forward compatibility.
@@ -416,6 +428,7 @@ type CoordinatorServer interface {
 	JoinGroup(context.Context, *JoinGroupRequest) (*JoinGroupResponse, error)
 	CommitOffsets(context.Context, *CommitOffsetsRequest) (*CommitOffsetsResponse, error)
 	UpdatePartitionLeader(context.Context, *UpdatePartitionLeaderRequest) (*UpdatePartitionLeaderResponse, error)
+	AlterIsr(context.Context, *AlterIsrRequest) (*AlterIsrResponse, error)
 	mustEmbedUnimplementedCoordinatorServer()
 }
 
@@ -443,6 +456,9 @@ func (UnimplementedCoordinatorServer) CommitOffsets(context.Context, *CommitOffs
 }
 func (UnimplementedCoordinatorServer) UpdatePartitionLeader(context.Context, *UpdatePartitionLeaderRequest) (*UpdatePartitionLeaderResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdatePartitionLeader not implemented")
+}
+func (UnimplementedCoordinatorServer) AlterIsr(context.Context, *AlterIsrRequest) (*AlterIsrResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AlterIsr not implemented")
 }
 func (UnimplementedCoordinatorServer) mustEmbedUnimplementedCoordinatorServer() {}
 func (UnimplementedCoordinatorServer) testEmbeddedByValue()                     {}
@@ -573,6 +589,24 @@ func _Coordinator_UpdatePartitionLeader_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Coordinator_AlterIsr_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AlterIsrRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoordinatorServer).AlterIsr(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Coordinator_AlterIsr_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoordinatorServer).AlterIsr(ctx, req.(*AlterIsrRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Coordinator_ServiceDesc is the grpc.ServiceDesc for Coordinator service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -604,7 +638,11 @@ var Coordinator_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "UpdatePartitionLeader",
 			Handler:    _Coordinator_UpdatePartitionLeader_Handler,
 		},
+		{
+			MethodName: "AlterIsr",
+			Handler:    _Coordinator_AlterIsr_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "proto/kafka_lite.proto",
+	Metadata: "kafka_lite.proto",
 }

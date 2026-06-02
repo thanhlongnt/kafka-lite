@@ -25,10 +25,12 @@ type Broker struct {
 	mu      sync.RWMutex
 	topics  map[string]map[int32]*Partition // sparse: only partitions this broker owns
 	dataDir string                          // empty → in-memory logs; non-empty → file-backed logs
-	id      int32                           // Broker ID
+	id       int32                          // Broker ID
+	selfAddr string                         // own gRPC address, set by Serve
 
 	peerClients map[int32]pb.BrokerClient
 	peerConns   map[int32]*grpc.ClientConn
+	peerAddrs   map[int32]string // broker ID → address (for ISR reporting)
 
 	coordClient pb.CoordinatorClient
 	coordConn   *grpc.ClientConn
@@ -41,6 +43,7 @@ func New(id int32) *Broker {
 		id:          id,
 		peerClients: make(map[int32]pb.BrokerClient),
 		peerConns:   make(map[int32]*grpc.ClientConn),
+		peerAddrs:   make(map[int32]string),
 	}
 }
 
@@ -54,6 +57,7 @@ func NewWithDataDir(id int32, dataDir string) (*Broker, error) {
 		id:          id,
 		peerClients: make(map[int32]pb.BrokerClient),
 		peerConns:   make(map[int32]*grpc.ClientConn),
+		peerAddrs:   make(map[int32]string),
 	}
 	if err := b.restore(); err != nil {
 		return nil, fmt.Errorf("restore from %s: %w", dataDir, err)
@@ -314,7 +318,7 @@ func (b *Broker) AssignRole(_ context.Context, req *pb.AssignRoleRequest) (*pb.A
 	}
 	switch req.Role {
 	case pb.ReplicaRole_LEADER:
-		p.BecomeLeader(req.Epoch)
+		p.BecomeLeader(req.Epoch, req.IsrIds)
 	case pb.ReplicaRole_FOLLOWER:
 		if err := b.ConnectToPeer(req.LeaderId, req.LeaderAddr); err != nil {
 			return nil, status.Errorf(codes.Internal, "connect to leader peer: %v", err)
@@ -330,6 +334,7 @@ func (b *Broker) AssignRole(_ context.Context, req *pb.AssignRoleRequest) (*pb.A
 // If a coordinator client is configured, also registers a CoordinatorServer proxy so
 // consumers can call JoinGroup/CommitOffsets/GetMetadata on the broker address directly.
 func (b *Broker) Serve(addr string) error {
+	b.selfAddr = addr
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)
@@ -400,8 +405,23 @@ func (b *Broker) ConnectToPeer(peerID int32, addr string) error {
 	// Cache the raw connection for teardown and the stub for replication
 	b.peerConns[peerID] = conn
 	b.peerClients[peerID] = pb.NewBrokerClient(conn)
+	b.peerAddrs[peerID] = addr
 
 	return nil
+}
+
+// reportISRChange calls AlterIsr on the coordinator to persist the current ISR.
+// It is called from partition background goroutines and must not hold p.mu.
+func (b *Broker) reportISRChange(topic string, partition int32, isrIDs []int32, epoch int64) {
+	if b.coordClient == nil {
+		return
+	}
+	_, _ = b.coordClient.AlterIsr(context.Background(), &pb.AlterIsrRequest{
+		Topic:     topic,
+		Partition: partition,
+		Epoch:     epoch,
+		IsrIds:    isrIDs,
+	})
 }
 
 // Close strictly tears down all peer connections and local partitions.

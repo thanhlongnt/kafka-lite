@@ -87,8 +87,12 @@ func (p *Partition) stopBackground() {
 }
 
 // BecomeLeader transitions the partition to the Leader role.
-// TODO: [Controller/Metadata] This transition should be invoked by a LeaderAndIsr or UpdateMetadata request originating from the Controller.
-func (p *Partition) BecomeLeader(epoch int64) {
+// initialISR is the set of broker IDs the coordinator considers in-sync at the
+// time of assignment. Replicas are left empty here; each follower joins the ISR
+// lazily via its first FetchReplica call (updateReplicaState). This lets HW
+// advance immediately when no follower has yet connected (e.g. on fresh topics),
+// while still converging to full replication once followers start fetching.
+func (p *Partition) BecomeLeader(epoch int64, _ []int32) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -164,8 +168,10 @@ func (p *Partition) monitorISR(ctx context.Context) {
 			}
 
 			if changed {
-				// TODO: [Controller/Metadata] Inform the Controller about the ISR change (AlterIsr RPC)
-				// to persist the new ISR state in the cluster metadata.
+				// Collect current ISR broker IDs and epoch before reporting.
+				isrIDs := p.currentISRIDs()
+				epoch := p.leaderEpoch
+				topic, partition := p.topic, p.id
 
 				minISR := p.log.LogEndOffset()
 				for _, r := range p.replicas {
@@ -177,6 +183,10 @@ func (p *Partition) monitorISR(ctx context.Context) {
 					p.hw = minISR
 					p.cond.Broadcast()
 				}
+
+				p.mu.Unlock()
+				go p.broker.reportISRChange(topic, partition, isrIDs, epoch)
+				p.mu.Lock() // re-acquire for the outer loop's defer-less Unlock below
 			}
 			p.mu.Unlock()
 		}
@@ -327,6 +337,17 @@ func (p *Partition) LeaderEpoch() int64 {
 	return p.leaderEpoch
 }
 
+// currentISRIDs returns the broker IDs of all in-sync replicas. Must be called with p.mu held.
+func (p *Partition) currentISRIDs() []int32 {
+	ids := make([]int32, 0, len(p.replicas))
+	for id, r := range p.replicas {
+		if r.inSync {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
 // updateReplicaState is called by the Leader to record follower fetches
 func (p *Partition) updateReplicaState(replicaID int32, fetchOffset int64) {
 	p.mu.Lock()
@@ -347,7 +368,10 @@ func (p *Partition) updateReplicaState(replicaID int32, fetchOffset int64) {
 	// Check if a lagging follower has caught up to the leader's LEO
 	if !state.inSync && state.logEndOffset >= p.log.LogEndOffset() {
 		state.inSync = true
-		// TODO: [Controller/Metadata] Inform the Controller about the ISR expansion (AlterIsr RPC)
+		isrIDs := p.currentISRIDs()
+		epoch := p.leaderEpoch
+		topic, partition := p.topic, p.id
+		go p.broker.reportISRChange(topic, partition, isrIDs, epoch)
 	}
 
 	// Update High Watermark

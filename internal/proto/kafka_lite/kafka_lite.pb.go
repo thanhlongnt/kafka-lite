@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v7.35.0
-// source: proto/kafka_lite.proto
+// source: kafka_lite.proto
 
 package kafka_lite
 
@@ -51,11 +51,11 @@ func (x ReplicaRole) String() string {
 }
 
 func (ReplicaRole) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_kafka_lite_proto_enumTypes[0].Descriptor()
+	return file_kafka_lite_proto_enumTypes[0].Descriptor()
 }
 
 func (ReplicaRole) Type() protoreflect.EnumType {
-	return &file_proto_kafka_lite_proto_enumTypes[0]
+	return &file_kafka_lite_proto_enumTypes[0]
 }
 
 func (x ReplicaRole) Number() protoreflect.EnumNumber {
@@ -64,7 +64,7 @@ func (x ReplicaRole) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ReplicaRole.Descriptor instead.
 func (ReplicaRole) EnumDescriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{0}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{0}
 }
 
 type Message struct {
@@ -80,7 +80,7 @@ type Message struct {
 
 func (x *Message) Reset() {
 	*x = Message{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[0]
+	mi := &file_kafka_lite_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -92,7 +92,7 @@ func (x *Message) String() string {
 func (*Message) ProtoMessage() {}
 
 func (x *Message) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[0]
+	mi := &file_kafka_lite_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -105,7 +105,7 @@ func (x *Message) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Message.ProtoReflect.Descriptor instead.
 func (*Message) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{0}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Message) GetTopic() string {
@@ -153,7 +153,7 @@ type TopicPartition struct {
 
 func (x *TopicPartition) Reset() {
 	*x = TopicPartition{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[1]
+	mi := &file_kafka_lite_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -165,7 +165,7 @@ func (x *TopicPartition) String() string {
 func (*TopicPartition) ProtoMessage() {}
 
 func (x *TopicPartition) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[1]
+	mi := &file_kafka_lite_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -178,7 +178,7 @@ func (x *TopicPartition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopicPartition.ProtoReflect.Descriptor instead.
 func (*TopicPartition) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{1}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *TopicPartition) GetTopic() string {
@@ -203,13 +203,14 @@ type AssignRoleRequest struct {
 	Epoch         int64                  `protobuf:"varint,4,opt,name=epoch,proto3" json:"epoch,omitempty"`
 	LeaderId      int32                  `protobuf:"varint,5,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`
 	LeaderAddr    string                 `protobuf:"bytes,6,opt,name=leader_addr,json=leaderAddr,proto3" json:"leader_addr,omitempty"`
+	IsrIds        []int32                `protobuf:"varint,7,rep,packed,name=isr_ids,json=isrIds,proto3" json:"isr_ids,omitempty"` // initial ISR broker IDs (LEADER role only)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AssignRoleRequest) Reset() {
 	*x = AssignRoleRequest{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[2]
+	mi := &file_kafka_lite_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -221,7 +222,7 @@ func (x *AssignRoleRequest) String() string {
 func (*AssignRoleRequest) ProtoMessage() {}
 
 func (x *AssignRoleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[2]
+	mi := &file_kafka_lite_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -234,7 +235,7 @@ func (x *AssignRoleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AssignRoleRequest.ProtoReflect.Descriptor instead.
 func (*AssignRoleRequest) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{2}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *AssignRoleRequest) GetTopic() string {
@@ -279,6 +280,13 @@ func (x *AssignRoleRequest) GetLeaderAddr() string {
 	return ""
 }
 
+func (x *AssignRoleRequest) GetIsrIds() []int32 {
+	if x != nil {
+		return x.IsrIds
+	}
+	return nil
+}
+
 type AssignRoleResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -287,7 +295,7 @@ type AssignRoleResponse struct {
 
 func (x *AssignRoleResponse) Reset() {
 	*x = AssignRoleResponse{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[3]
+	mi := &file_kafka_lite_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -299,7 +307,7 @@ func (x *AssignRoleResponse) String() string {
 func (*AssignRoleResponse) ProtoMessage() {}
 
 func (x *AssignRoleResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[3]
+	mi := &file_kafka_lite_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -312,7 +320,7 @@ func (x *AssignRoleResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AssignRoleResponse.ProtoReflect.Descriptor instead.
 func (*AssignRoleResponse) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{3}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{3}
 }
 
 type CreateTopicRequest struct {
@@ -325,7 +333,7 @@ type CreateTopicRequest struct {
 
 func (x *CreateTopicRequest) Reset() {
 	*x = CreateTopicRequest{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[4]
+	mi := &file_kafka_lite_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -337,7 +345,7 @@ func (x *CreateTopicRequest) String() string {
 func (*CreateTopicRequest) ProtoMessage() {}
 
 func (x *CreateTopicRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[4]
+	mi := &file_kafka_lite_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -350,7 +358,7 @@ func (x *CreateTopicRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTopicRequest.ProtoReflect.Descriptor instead.
 func (*CreateTopicRequest) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{4}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CreateTopicRequest) GetTopic() string {
@@ -375,7 +383,7 @@ type CreateTopicResponse struct {
 
 func (x *CreateTopicResponse) Reset() {
 	*x = CreateTopicResponse{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[5]
+	mi := &file_kafka_lite_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -387,7 +395,7 @@ func (x *CreateTopicResponse) String() string {
 func (*CreateTopicResponse) ProtoMessage() {}
 
 func (x *CreateTopicResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[5]
+	mi := &file_kafka_lite_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -400,7 +408,7 @@ func (x *CreateTopicResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTopicResponse.ProtoReflect.Descriptor instead.
 func (*CreateTopicResponse) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{5}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{5}
 }
 
 type ProduceRequest struct {
@@ -415,7 +423,7 @@ type ProduceRequest struct {
 
 func (x *ProduceRequest) Reset() {
 	*x = ProduceRequest{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[6]
+	mi := &file_kafka_lite_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -427,7 +435,7 @@ func (x *ProduceRequest) String() string {
 func (*ProduceRequest) ProtoMessage() {}
 
 func (x *ProduceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[6]
+	mi := &file_kafka_lite_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -440,7 +448,7 @@ func (x *ProduceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProduceRequest.ProtoReflect.Descriptor instead.
 func (*ProduceRequest) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{6}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ProduceRequest) GetTopic() string {
@@ -480,7 +488,7 @@ type ProduceResponse struct {
 
 func (x *ProduceResponse) Reset() {
 	*x = ProduceResponse{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[7]
+	mi := &file_kafka_lite_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -492,7 +500,7 @@ func (x *ProduceResponse) String() string {
 func (*ProduceResponse) ProtoMessage() {}
 
 func (x *ProduceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[7]
+	mi := &file_kafka_lite_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -505,7 +513,7 @@ func (x *ProduceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProduceResponse.ProtoReflect.Descriptor instead.
 func (*ProduceResponse) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{7}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ProduceResponse) GetOffset() int64 {
@@ -526,7 +534,7 @@ type FetchRequest struct {
 
 func (x *FetchRequest) Reset() {
 	*x = FetchRequest{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[8]
+	mi := &file_kafka_lite_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -538,7 +546,7 @@ func (x *FetchRequest) String() string {
 func (*FetchRequest) ProtoMessage() {}
 
 func (x *FetchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[8]
+	mi := &file_kafka_lite_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -551,7 +559,7 @@ func (x *FetchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FetchRequest.ProtoReflect.Descriptor instead.
 func (*FetchRequest) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{8}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *FetchRequest) GetTopic() string {
@@ -588,7 +596,7 @@ type FetchReplicaRequest struct {
 
 func (x *FetchReplicaRequest) Reset() {
 	*x = FetchReplicaRequest{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[9]
+	mi := &file_kafka_lite_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -600,7 +608,7 @@ func (x *FetchReplicaRequest) String() string {
 func (*FetchReplicaRequest) ProtoMessage() {}
 
 func (x *FetchReplicaRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[9]
+	mi := &file_kafka_lite_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -613,7 +621,7 @@ func (x *FetchReplicaRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FetchReplicaRequest.ProtoReflect.Descriptor instead.
 func (*FetchReplicaRequest) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{9}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *FetchReplicaRequest) GetTopic() string {
@@ -662,7 +670,7 @@ type ReplicaRecord struct {
 
 func (x *ReplicaRecord) Reset() {
 	*x = ReplicaRecord{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[10]
+	mi := &file_kafka_lite_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -674,7 +682,7 @@ func (x *ReplicaRecord) String() string {
 func (*ReplicaRecord) ProtoMessage() {}
 
 func (x *ReplicaRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[10]
+	mi := &file_kafka_lite_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -687,7 +695,7 @@ func (x *ReplicaRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplicaRecord.ProtoReflect.Descriptor instead.
 func (*ReplicaRecord) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{10}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ReplicaRecord) GetMessage() *Message {
@@ -720,7 +728,7 @@ type MetadataRequest struct {
 
 func (x *MetadataRequest) Reset() {
 	*x = MetadataRequest{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[11]
+	mi := &file_kafka_lite_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -732,7 +740,7 @@ func (x *MetadataRequest) String() string {
 func (*MetadataRequest) ProtoMessage() {}
 
 func (x *MetadataRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[11]
+	mi := &file_kafka_lite_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -745,7 +753,7 @@ func (x *MetadataRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetadataRequest.ProtoReflect.Descriptor instead.
 func (*MetadataRequest) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{11}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *MetadataRequest) GetTopic() string {
@@ -765,7 +773,7 @@ type PartitionInfo struct {
 
 func (x *PartitionInfo) Reset() {
 	*x = PartitionInfo{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[12]
+	mi := &file_kafka_lite_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -777,7 +785,7 @@ func (x *PartitionInfo) String() string {
 func (*PartitionInfo) ProtoMessage() {}
 
 func (x *PartitionInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[12]
+	mi := &file_kafka_lite_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -790,7 +798,7 @@ func (x *PartitionInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartitionInfo.ProtoReflect.Descriptor instead.
 func (*PartitionInfo) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{12}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *PartitionInfo) GetPartition() int32 {
@@ -816,7 +824,7 @@ type MetadataResponse struct {
 
 func (x *MetadataResponse) Reset() {
 	*x = MetadataResponse{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[13]
+	mi := &file_kafka_lite_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -828,7 +836,7 @@ func (x *MetadataResponse) String() string {
 func (*MetadataResponse) ProtoMessage() {}
 
 func (x *MetadataResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[13]
+	mi := &file_kafka_lite_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -841,7 +849,7 @@ func (x *MetadataResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetadataResponse.ProtoReflect.Descriptor instead.
 func (*MetadataResponse) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{13}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *MetadataResponse) GetPartitions() []*PartitionInfo {
@@ -861,7 +869,7 @@ type RegisterBrokerRequest struct {
 
 func (x *RegisterBrokerRequest) Reset() {
 	*x = RegisterBrokerRequest{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[14]
+	mi := &file_kafka_lite_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -873,7 +881,7 @@ func (x *RegisterBrokerRequest) String() string {
 func (*RegisterBrokerRequest) ProtoMessage() {}
 
 func (x *RegisterBrokerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[14]
+	mi := &file_kafka_lite_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -886,7 +894,7 @@ func (x *RegisterBrokerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterBrokerRequest.ProtoReflect.Descriptor instead.
 func (*RegisterBrokerRequest) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{14}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RegisterBrokerRequest) GetAddr() string {
@@ -911,7 +919,7 @@ type RegisterBrokerResponse struct {
 
 func (x *RegisterBrokerResponse) Reset() {
 	*x = RegisterBrokerResponse{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[15]
+	mi := &file_kafka_lite_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -923,7 +931,7 @@ func (x *RegisterBrokerResponse) String() string {
 func (*RegisterBrokerResponse) ProtoMessage() {}
 
 func (x *RegisterBrokerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[15]
+	mi := &file_kafka_lite_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -936,7 +944,7 @@ func (x *RegisterBrokerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterBrokerResponse.ProtoReflect.Descriptor instead.
 func (*RegisterBrokerResponse) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{15}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{15}
 }
 
 type JoinGroupRequest struct {
@@ -950,7 +958,7 @@ type JoinGroupRequest struct {
 
 func (x *JoinGroupRequest) Reset() {
 	*x = JoinGroupRequest{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[16]
+	mi := &file_kafka_lite_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -962,7 +970,7 @@ func (x *JoinGroupRequest) String() string {
 func (*JoinGroupRequest) ProtoMessage() {}
 
 func (x *JoinGroupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[16]
+	mi := &file_kafka_lite_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -975,7 +983,7 @@ func (x *JoinGroupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinGroupRequest.ProtoReflect.Descriptor instead.
 func (*JoinGroupRequest) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{16}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *JoinGroupRequest) GetGroupId() string {
@@ -1008,7 +1016,7 @@ type JoinGroupResponse struct {
 
 func (x *JoinGroupResponse) Reset() {
 	*x = JoinGroupResponse{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[17]
+	mi := &file_kafka_lite_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1020,7 +1028,7 @@ func (x *JoinGroupResponse) String() string {
 func (*JoinGroupResponse) ProtoMessage() {}
 
 func (x *JoinGroupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[17]
+	mi := &file_kafka_lite_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1033,7 +1041,7 @@ func (x *JoinGroupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinGroupResponse.ProtoReflect.Descriptor instead.
 func (*JoinGroupResponse) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{17}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *JoinGroupResponse) GetAssignedPartitions() []int32 {
@@ -1053,7 +1061,7 @@ type PartitionOffset struct {
 
 func (x *PartitionOffset) Reset() {
 	*x = PartitionOffset{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[18]
+	mi := &file_kafka_lite_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1065,7 +1073,7 @@ func (x *PartitionOffset) String() string {
 func (*PartitionOffset) ProtoMessage() {}
 
 func (x *PartitionOffset) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[18]
+	mi := &file_kafka_lite_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1078,7 +1086,7 @@ func (x *PartitionOffset) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartitionOffset.ProtoReflect.Descriptor instead.
 func (*PartitionOffset) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{18}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *PartitionOffset) GetPartition() int32 {
@@ -1106,7 +1114,7 @@ type CommitOffsetsRequest struct {
 
 func (x *CommitOffsetsRequest) Reset() {
 	*x = CommitOffsetsRequest{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[19]
+	mi := &file_kafka_lite_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1118,7 +1126,7 @@ func (x *CommitOffsetsRequest) String() string {
 func (*CommitOffsetsRequest) ProtoMessage() {}
 
 func (x *CommitOffsetsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[19]
+	mi := &file_kafka_lite_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1131,7 +1139,7 @@ func (x *CommitOffsetsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommitOffsetsRequest.ProtoReflect.Descriptor instead.
 func (*CommitOffsetsRequest) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{19}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *CommitOffsetsRequest) GetGroupId() string {
@@ -1163,7 +1171,7 @@ type CommitOffsetsResponse struct {
 
 func (x *CommitOffsetsResponse) Reset() {
 	*x = CommitOffsetsResponse{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[20]
+	mi := &file_kafka_lite_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1175,7 +1183,7 @@ func (x *CommitOffsetsResponse) String() string {
 func (*CommitOffsetsResponse) ProtoMessage() {}
 
 func (x *CommitOffsetsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[20]
+	mi := &file_kafka_lite_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1188,7 +1196,7 @@ func (x *CommitOffsetsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommitOffsetsResponse.ProtoReflect.Descriptor instead.
 func (*CommitOffsetsResponse) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{20}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{20}
 }
 
 type UpdatePartitionLeaderRequest struct {
@@ -1202,7 +1210,7 @@ type UpdatePartitionLeaderRequest struct {
 
 func (x *UpdatePartitionLeaderRequest) Reset() {
 	*x = UpdatePartitionLeaderRequest{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[21]
+	mi := &file_kafka_lite_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1214,7 +1222,7 @@ func (x *UpdatePartitionLeaderRequest) String() string {
 func (*UpdatePartitionLeaderRequest) ProtoMessage() {}
 
 func (x *UpdatePartitionLeaderRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[21]
+	mi := &file_kafka_lite_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1227,7 +1235,7 @@ func (x *UpdatePartitionLeaderRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdatePartitionLeaderRequest.ProtoReflect.Descriptor instead.
 func (*UpdatePartitionLeaderRequest) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{21}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *UpdatePartitionLeaderRequest) GetTopic() string {
@@ -1259,7 +1267,7 @@ type UpdatePartitionLeaderResponse struct {
 
 func (x *UpdatePartitionLeaderResponse) Reset() {
 	*x = UpdatePartitionLeaderResponse{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[22]
+	mi := &file_kafka_lite_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1271,7 +1279,7 @@ func (x *UpdatePartitionLeaderResponse) String() string {
 func (*UpdatePartitionLeaderResponse) ProtoMessage() {}
 
 func (x *UpdatePartitionLeaderResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[22]
+	mi := &file_kafka_lite_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1284,7 +1292,111 @@ func (x *UpdatePartitionLeaderResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdatePartitionLeaderResponse.ProtoReflect.Descriptor instead.
 func (*UpdatePartitionLeaderResponse) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{22}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{22}
+}
+
+type AlterIsrRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Topic         string                 `protobuf:"bytes,1,opt,name=topic,proto3" json:"topic,omitempty"`
+	Partition     int32                  `protobuf:"varint,2,opt,name=partition,proto3" json:"partition,omitempty"`
+	Epoch         int64                  `protobuf:"varint,3,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	IsrIds        []int32                `protobuf:"varint,4,rep,packed,name=isr_ids,json=isrIds,proto3" json:"isr_ids,omitempty"` // broker IDs currently in sync
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AlterIsrRequest) Reset() {
+	*x = AlterIsrRequest{}
+	mi := &file_kafka_lite_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AlterIsrRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AlterIsrRequest) ProtoMessage() {}
+
+func (x *AlterIsrRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kafka_lite_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AlterIsrRequest.ProtoReflect.Descriptor instead.
+func (*AlterIsrRequest) Descriptor() ([]byte, []int) {
+	return file_kafka_lite_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *AlterIsrRequest) GetTopic() string {
+	if x != nil {
+		return x.Topic
+	}
+	return ""
+}
+
+func (x *AlterIsrRequest) GetPartition() int32 {
+	if x != nil {
+		return x.Partition
+	}
+	return 0
+}
+
+func (x *AlterIsrRequest) GetEpoch() int64 {
+	if x != nil {
+		return x.Epoch
+	}
+	return 0
+}
+
+func (x *AlterIsrRequest) GetIsrIds() []int32 {
+	if x != nil {
+		return x.IsrIds
+	}
+	return nil
+}
+
+type AlterIsrResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AlterIsrResponse) Reset() {
+	*x = AlterIsrResponse{}
+	mi := &file_kafka_lite_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AlterIsrResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AlterIsrResponse) ProtoMessage() {}
+
+func (x *AlterIsrResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kafka_lite_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AlterIsrResponse.ProtoReflect.Descriptor instead.
+func (*AlterIsrResponse) Descriptor() ([]byte, []int) {
+	return file_kafka_lite_proto_rawDescGZIP(), []int{24}
 }
 
 type InitPartitionsRequest struct {
@@ -1297,7 +1409,7 @@ type InitPartitionsRequest struct {
 
 func (x *InitPartitionsRequest) Reset() {
 	*x = InitPartitionsRequest{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[23]
+	mi := &file_kafka_lite_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1309,7 +1421,7 @@ func (x *InitPartitionsRequest) String() string {
 func (*InitPartitionsRequest) ProtoMessage() {}
 
 func (x *InitPartitionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[23]
+	mi := &file_kafka_lite_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1322,7 +1434,7 @@ func (x *InitPartitionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InitPartitionsRequest.ProtoReflect.Descriptor instead.
 func (*InitPartitionsRequest) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{23}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *InitPartitionsRequest) GetTopic() string {
@@ -1347,7 +1459,7 @@ type InitPartitionsResponse struct {
 
 func (x *InitPartitionsResponse) Reset() {
 	*x = InitPartitionsResponse{}
-	mi := &file_proto_kafka_lite_proto_msgTypes[24]
+	mi := &file_kafka_lite_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1359,7 +1471,7 @@ func (x *InitPartitionsResponse) String() string {
 func (*InitPartitionsResponse) ProtoMessage() {}
 
 func (x *InitPartitionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_kafka_lite_proto_msgTypes[24]
+	mi := &file_kafka_lite_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1372,14 +1484,14 @@ func (x *InitPartitionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InitPartitionsResponse.ProtoReflect.Descriptor instead.
 func (*InitPartitionsResponse) Descriptor() ([]byte, []int) {
-	return file_proto_kafka_lite_proto_rawDescGZIP(), []int{24}
+	return file_kafka_lite_proto_rawDescGZIP(), []int{26}
 }
 
-var File_proto_kafka_lite_proto protoreflect.FileDescriptor
+var File_kafka_lite_proto protoreflect.FileDescriptor
 
-const file_proto_kafka_lite_proto_rawDesc = "" +
+const file_kafka_lite_proto_rawDesc = "" +
 	"\n" +
-	"\x16proto/kafka_lite.proto\x12\n" +
+	"\x10kafka_lite.proto\x12\n" +
 	"kafka_lite\"}\n" +
 	"\aMessage\x12\x14\n" +
 	"\x05topic\x18\x01 \x01(\tR\x05topic\x12\x1c\n" +
@@ -1389,7 +1501,7 @@ const file_proto_kafka_lite_proto_rawDesc = "" +
 	"\x06offset\x18\x05 \x01(\x03R\x06offset\"D\n" +
 	"\x0eTopicPartition\x12\x14\n" +
 	"\x05topic\x18\x01 \x01(\tR\x05topic\x12\x1c\n" +
-	"\tpartition\x18\x02 \x01(\x05R\tpartition\"\xc8\x01\n" +
+	"\tpartition\x18\x02 \x01(\x05R\tpartition\"\xe1\x01\n" +
 	"\x11AssignRoleRequest\x12\x14\n" +
 	"\x05topic\x18\x01 \x01(\tR\x05topic\x12\x1c\n" +
 	"\tpartition\x18\x02 \x01(\x05R\tpartition\x12+\n" +
@@ -1397,7 +1509,8 @@ const file_proto_kafka_lite_proto_rawDesc = "" +
 	"\x05epoch\x18\x04 \x01(\x03R\x05epoch\x12\x1b\n" +
 	"\tleader_id\x18\x05 \x01(\x05R\bleaderId\x12\x1f\n" +
 	"\vleader_addr\x18\x06 \x01(\tR\n" +
-	"leaderAddr\"\x14\n" +
+	"leaderAddr\x12\x17\n" +
+	"\aisr_ids\x18\a \x03(\x05R\x06isrIds\"\x14\n" +
 	"\x12AssignRoleResponse\"J\n" +
 	"\x12CreateTopicRequest\x12\x14\n" +
 	"\x05topic\x18\x01 \x01(\tR\x05topic\x12\x1e\n" +
@@ -1460,7 +1573,13 @@ const file_proto_kafka_lite_proto_rawDesc = "" +
 	"\tpartition\x18\x02 \x01(\x05R\tpartition\x12\x1f\n" +
 	"\vbroker_addr\x18\x03 \x01(\tR\n" +
 	"brokerAddr\"\x1f\n" +
-	"\x1dUpdatePartitionLeaderResponse\"M\n" +
+	"\x1dUpdatePartitionLeaderResponse\"t\n" +
+	"\x0fAlterIsrRequest\x12\x14\n" +
+	"\x05topic\x18\x01 \x01(\tR\x05topic\x12\x1c\n" +
+	"\tpartition\x18\x02 \x01(\x05R\tpartition\x12\x14\n" +
+	"\x05epoch\x18\x03 \x01(\x03R\x05epoch\x12\x17\n" +
+	"\aisr_ids\x18\x04 \x03(\x05R\x06isrIds\"\x12\n" +
+	"\x10AlterIsrResponse\"M\n" +
 	"\x15InitPartitionsRequest\x12\x14\n" +
 	"\x05topic\x18\x01 \x01(\tR\x05topic\x12\x1e\n" +
 	"\n" +
@@ -1478,30 +1597,31 @@ const file_proto_kafka_lite_proto_rawDesc = "" +
 	"\fFetchReplica\x12\x1f.kafka_lite.FetchReplicaRequest\x1a\x19.kafka_lite.ReplicaRecord0\x01\x12W\n" +
 	"\x0eInitPartitions\x12!.kafka_lite.InitPartitionsRequest\x1a\".kafka_lite.InitPartitionsResponse\x12K\n" +
 	"\n" +
-	"AssignRole\x12\x1d.kafka_lite.AssignRoleRequest\x1a\x1e.kafka_lite.AssignRoleResponse2\x8e\x04\n" +
+	"AssignRole\x12\x1d.kafka_lite.AssignRoleRequest\x1a\x1e.kafka_lite.AssignRoleResponse2\xd5\x04\n" +
 	"\vCoordinator\x12N\n" +
 	"\vCreateTopic\x12\x1e.kafka_lite.CreateTopicRequest\x1a\x1f.kafka_lite.CreateTopicResponse\x12H\n" +
 	"\vGetMetadata\x12\x1b.kafka_lite.MetadataRequest\x1a\x1c.kafka_lite.MetadataResponse\x12W\n" +
 	"\x0eRegisterBroker\x12!.kafka_lite.RegisterBrokerRequest\x1a\".kafka_lite.RegisterBrokerResponse\x12H\n" +
 	"\tJoinGroup\x12\x1c.kafka_lite.JoinGroupRequest\x1a\x1d.kafka_lite.JoinGroupResponse\x12T\n" +
 	"\rCommitOffsets\x12 .kafka_lite.CommitOffsetsRequest\x1a!.kafka_lite.CommitOffsetsResponse\x12l\n" +
-	"\x15UpdatePartitionLeader\x12(.kafka_lite.UpdatePartitionLeaderRequest\x1a).kafka_lite.UpdatePartitionLeaderResponseB=Z;github.com/thanhlongnt/kafka-lite/internal/proto/kafka_liteb\x06proto3"
+	"\x15UpdatePartitionLeader\x12(.kafka_lite.UpdatePartitionLeaderRequest\x1a).kafka_lite.UpdatePartitionLeaderResponse\x12E\n" +
+	"\bAlterIsr\x12\x1b.kafka_lite.AlterIsrRequest\x1a\x1c.kafka_lite.AlterIsrResponseB=Z;github.com/thanhlongnt/kafka-lite/internal/proto/kafka_liteb\x06proto3"
 
 var (
-	file_proto_kafka_lite_proto_rawDescOnce sync.Once
-	file_proto_kafka_lite_proto_rawDescData []byte
+	file_kafka_lite_proto_rawDescOnce sync.Once
+	file_kafka_lite_proto_rawDescData []byte
 )
 
-func file_proto_kafka_lite_proto_rawDescGZIP() []byte {
-	file_proto_kafka_lite_proto_rawDescOnce.Do(func() {
-		file_proto_kafka_lite_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_kafka_lite_proto_rawDesc), len(file_proto_kafka_lite_proto_rawDesc)))
+func file_kafka_lite_proto_rawDescGZIP() []byte {
+	file_kafka_lite_proto_rawDescOnce.Do(func() {
+		file_kafka_lite_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_kafka_lite_proto_rawDesc), len(file_kafka_lite_proto_rawDesc)))
 	})
-	return file_proto_kafka_lite_proto_rawDescData
+	return file_kafka_lite_proto_rawDescData
 }
 
-var file_proto_kafka_lite_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_proto_kafka_lite_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
-var file_proto_kafka_lite_proto_goTypes = []any{
+var file_kafka_lite_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_kafka_lite_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_kafka_lite_proto_goTypes = []any{
 	(ReplicaRole)(0),                      // 0: kafka_lite.ReplicaRole
 	(*Message)(nil),                       // 1: kafka_lite.Message
 	(*TopicPartition)(nil),                // 2: kafka_lite.TopicPartition
@@ -1526,10 +1646,12 @@ var file_proto_kafka_lite_proto_goTypes = []any{
 	(*CommitOffsetsResponse)(nil),         // 21: kafka_lite.CommitOffsetsResponse
 	(*UpdatePartitionLeaderRequest)(nil),  // 22: kafka_lite.UpdatePartitionLeaderRequest
 	(*UpdatePartitionLeaderResponse)(nil), // 23: kafka_lite.UpdatePartitionLeaderResponse
-	(*InitPartitionsRequest)(nil),         // 24: kafka_lite.InitPartitionsRequest
-	(*InitPartitionsResponse)(nil),        // 25: kafka_lite.InitPartitionsResponse
+	(*AlterIsrRequest)(nil),               // 24: kafka_lite.AlterIsrRequest
+	(*AlterIsrResponse)(nil),              // 25: kafka_lite.AlterIsrResponse
+	(*InitPartitionsRequest)(nil),         // 26: kafka_lite.InitPartitionsRequest
+	(*InitPartitionsResponse)(nil),        // 27: kafka_lite.InitPartitionsResponse
 }
-var file_proto_kafka_lite_proto_depIdxs = []int32{
+var file_kafka_lite_proto_depIdxs = []int32{
 	0,  // 0: kafka_lite.AssignRoleRequest.role:type_name -> kafka_lite.ReplicaRole
 	1,  // 1: kafka_lite.ReplicaRecord.message:type_name -> kafka_lite.Message
 	13, // 2: kafka_lite.MetadataResponse.partitions:type_name -> kafka_lite.PartitionInfo
@@ -1538,7 +1660,7 @@ var file_proto_kafka_lite_proto_depIdxs = []int32{
 	7,  // 5: kafka_lite.Broker.Produce:input_type -> kafka_lite.ProduceRequest
 	9,  // 6: kafka_lite.Broker.Fetch:input_type -> kafka_lite.FetchRequest
 	10, // 7: kafka_lite.Broker.FetchReplica:input_type -> kafka_lite.FetchReplicaRequest
-	24, // 8: kafka_lite.Broker.InitPartitions:input_type -> kafka_lite.InitPartitionsRequest
+	26, // 8: kafka_lite.Broker.InitPartitions:input_type -> kafka_lite.InitPartitionsRequest
 	3,  // 9: kafka_lite.Broker.AssignRole:input_type -> kafka_lite.AssignRoleRequest
 	5,  // 10: kafka_lite.Coordinator.CreateTopic:input_type -> kafka_lite.CreateTopicRequest
 	12, // 11: kafka_lite.Coordinator.GetMetadata:input_type -> kafka_lite.MetadataRequest
@@ -1546,46 +1668,48 @@ var file_proto_kafka_lite_proto_depIdxs = []int32{
 	17, // 13: kafka_lite.Coordinator.JoinGroup:input_type -> kafka_lite.JoinGroupRequest
 	20, // 14: kafka_lite.Coordinator.CommitOffsets:input_type -> kafka_lite.CommitOffsetsRequest
 	22, // 15: kafka_lite.Coordinator.UpdatePartitionLeader:input_type -> kafka_lite.UpdatePartitionLeaderRequest
-	6,  // 16: kafka_lite.Broker.CreateTopic:output_type -> kafka_lite.CreateTopicResponse
-	8,  // 17: kafka_lite.Broker.Produce:output_type -> kafka_lite.ProduceResponse
-	1,  // 18: kafka_lite.Broker.Fetch:output_type -> kafka_lite.Message
-	11, // 19: kafka_lite.Broker.FetchReplica:output_type -> kafka_lite.ReplicaRecord
-	25, // 20: kafka_lite.Broker.InitPartitions:output_type -> kafka_lite.InitPartitionsResponse
-	4,  // 21: kafka_lite.Broker.AssignRole:output_type -> kafka_lite.AssignRoleResponse
-	6,  // 22: kafka_lite.Coordinator.CreateTopic:output_type -> kafka_lite.CreateTopicResponse
-	14, // 23: kafka_lite.Coordinator.GetMetadata:output_type -> kafka_lite.MetadataResponse
-	16, // 24: kafka_lite.Coordinator.RegisterBroker:output_type -> kafka_lite.RegisterBrokerResponse
-	18, // 25: kafka_lite.Coordinator.JoinGroup:output_type -> kafka_lite.JoinGroupResponse
-	21, // 26: kafka_lite.Coordinator.CommitOffsets:output_type -> kafka_lite.CommitOffsetsResponse
-	23, // 27: kafka_lite.Coordinator.UpdatePartitionLeader:output_type -> kafka_lite.UpdatePartitionLeaderResponse
-	16, // [16:28] is the sub-list for method output_type
-	4,  // [4:16] is the sub-list for method input_type
+	24, // 16: kafka_lite.Coordinator.AlterIsr:input_type -> kafka_lite.AlterIsrRequest
+	6,  // 17: kafka_lite.Broker.CreateTopic:output_type -> kafka_lite.CreateTopicResponse
+	8,  // 18: kafka_lite.Broker.Produce:output_type -> kafka_lite.ProduceResponse
+	1,  // 19: kafka_lite.Broker.Fetch:output_type -> kafka_lite.Message
+	11, // 20: kafka_lite.Broker.FetchReplica:output_type -> kafka_lite.ReplicaRecord
+	27, // 21: kafka_lite.Broker.InitPartitions:output_type -> kafka_lite.InitPartitionsResponse
+	4,  // 22: kafka_lite.Broker.AssignRole:output_type -> kafka_lite.AssignRoleResponse
+	6,  // 23: kafka_lite.Coordinator.CreateTopic:output_type -> kafka_lite.CreateTopicResponse
+	14, // 24: kafka_lite.Coordinator.GetMetadata:output_type -> kafka_lite.MetadataResponse
+	16, // 25: kafka_lite.Coordinator.RegisterBroker:output_type -> kafka_lite.RegisterBrokerResponse
+	18, // 26: kafka_lite.Coordinator.JoinGroup:output_type -> kafka_lite.JoinGroupResponse
+	21, // 27: kafka_lite.Coordinator.CommitOffsets:output_type -> kafka_lite.CommitOffsetsResponse
+	23, // 28: kafka_lite.Coordinator.UpdatePartitionLeader:output_type -> kafka_lite.UpdatePartitionLeaderResponse
+	25, // 29: kafka_lite.Coordinator.AlterIsr:output_type -> kafka_lite.AlterIsrResponse
+	17, // [17:30] is the sub-list for method output_type
+	4,  // [4:17] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
 	4,  // [4:4] is the sub-list for extension extendee
 	0,  // [0:4] is the sub-list for field type_name
 }
 
-func init() { file_proto_kafka_lite_proto_init() }
-func file_proto_kafka_lite_proto_init() {
-	if File_proto_kafka_lite_proto != nil {
+func init() { file_kafka_lite_proto_init() }
+func file_kafka_lite_proto_init() {
+	if File_kafka_lite_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_kafka_lite_proto_rawDesc), len(file_proto_kafka_lite_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kafka_lite_proto_rawDesc), len(file_kafka_lite_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   25,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
-		GoTypes:           file_proto_kafka_lite_proto_goTypes,
-		DependencyIndexes: file_proto_kafka_lite_proto_depIdxs,
-		EnumInfos:         file_proto_kafka_lite_proto_enumTypes,
-		MessageInfos:      file_proto_kafka_lite_proto_msgTypes,
+		GoTypes:           file_kafka_lite_proto_goTypes,
+		DependencyIndexes: file_kafka_lite_proto_depIdxs,
+		EnumInfos:         file_kafka_lite_proto_enumTypes,
+		MessageInfos:      file_kafka_lite_proto_msgTypes,
 	}.Build()
-	File_proto_kafka_lite_proto = out.File
-	file_proto_kafka_lite_proto_goTypes = nil
-	file_proto_kafka_lite_proto_depIdxs = nil
+	File_kafka_lite_proto = out.File
+	file_kafka_lite_proto_goTypes = nil
+	file_kafka_lite_proto_depIdxs = nil
 }
