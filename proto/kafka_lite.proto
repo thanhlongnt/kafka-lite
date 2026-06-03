@@ -25,8 +25,26 @@ service Broker {
   rpc CreateTopic(CreateTopicRequest) returns (CreateTopicResponse);
   rpc Produce(ProduceRequest)         returns (ProduceResponse);
   rpc Fetch(FetchRequest)             returns (stream Message);
+  rpc FetchReplica(FetchReplicaRequest) returns (stream ReplicaRecord);
   rpc InitPartitions(InitPartitionsRequest) returns (InitPartitionsResponse);
+  rpc AssignRole(AssignRoleRequest) returns (AssignRoleResponse);
 }
+
+enum ReplicaRole {
+  LEADER   = 0;
+  FOLLOWER = 1;
+}
+
+message AssignRoleRequest {
+  string          topic       = 1;
+  int32           partition   = 2;
+  ReplicaRole     role        = 3;
+  int64           epoch       = 4;
+  int32           leader_id   = 5;
+  string          leader_addr = 6;
+  repeated int32  isr_ids     = 7; // initial ISR broker IDs (LEADER role only)
+}
+message AssignRoleResponse {}
 
 message CreateTopicRequest {
   string topic      = 1;
@@ -54,6 +72,20 @@ message FetchRequest {
   int64  start_offset = 3;
 }
 
+message FetchReplicaRequest {
+  string topic        = 1;
+  int32  partition    = 2;
+  int64  fetch_offset = 3;
+  int32  replica_id   = 4;
+  int64  leader_epoch = 5;
+}
+
+message ReplicaRecord {
+  Message message       = 1;
+  int64 high_watermark  = 2;
+  int64 leader_epoch    = 3;
+}
+
 // ── Coordinator service (Phase 2) ─────────────────────────────────────────────
 
 service Coordinator {
@@ -63,6 +95,7 @@ service Coordinator {
   rpc JoinGroup(JoinGroupRequest)           returns (JoinGroupResponse);
   rpc CommitOffsets(CommitOffsetsRequest)   returns (CommitOffsetsResponse);
   rpc UpdatePartitionLeader(UpdatePartitionLeaderRequest) returns (UpdatePartitionLeaderResponse);
+  rpc AlterIsr(AlterIsrRequest) returns (AlterIsrResponse);
 }
 
 message MetadataRequest {
@@ -80,6 +113,7 @@ message MetadataResponse {
 
 message RegisterBrokerRequest {
   string addr = 1;
+  int32  id   = 2;
 }
 
 message RegisterBrokerResponse {}
@@ -113,6 +147,14 @@ message UpdatePartitionLeaderRequest {
   string broker_addr = 3;
 }
 message UpdatePartitionLeaderResponse {}
+
+message AlterIsrRequest {
+  string          topic     = 1;
+  int32           partition = 2;
+  int64           epoch     = 3;
+  repeated int32  isr_ids   = 4; // broker IDs currently in sync
+}
+message AlterIsrResponse {}
 
 message InitPartitionsRequest {
   string topic = 1;

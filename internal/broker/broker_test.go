@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 
+	"net"
+
 	"github.com/thanhlongnt/kafka-lite/internal/broker"
 	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
 	"google.golang.org/grpc"
@@ -13,19 +15,19 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
-	"net"
 )
 
 const bufSize = 1 << 20
 
 func newTestServer(t *testing.T) pb.BrokerClient {
 	t.Helper()
-	return serveAndConnect(t, broker.New())
+	return serveAndConnect(t, broker.New(1))
 }
 
 func newTestServerWithDataDir(t *testing.T, dataDir string) (pb.BrokerClient, func()) {
 	t.Helper()
-	b, err := broker.NewWithDataDir(dataDir)
+	// passing default id = 1
+	b, err := broker.NewWithDataDir(1, dataDir)
 	if err != nil {
 		t.Fatalf("NewWithDataDir: %v", err)
 	}

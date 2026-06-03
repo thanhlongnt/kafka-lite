@@ -27,15 +27,15 @@ type Consumer struct {
 
 	// Phase 2
 	coordClient pb.CoordinatorClient
-	groupID    string
-	memberID   string
-	readers   []*partitionReader
-	nextIdx int
-	dialBroker func(ctx context.Context, brokerAddr string) (pb.BrokerClient, error)
+	groupID     string
+	memberID    string
+	readers     []*partitionReader
+	nextIdx     int
+	dialBroker  func(ctx context.Context, brokerAddr string) (pb.BrokerClient, error)
 
-	lastRebalanceCheck      time.Time
-	rebalanceInterval       time.Duration
-	rebalanceIntervalIsSet  bool
+	lastRebalanceCheck     time.Time
+	rebalanceInterval      time.Duration
+	rebalanceIntervalIsSet bool
 }
 
 // New dials brokerAddr and returns a Consumer ready to read from topic/partition
@@ -76,9 +76,9 @@ func (c *Consumer) JoinGroup(ctx context.Context, groupID string, memberID strin
 		}
 	}
 	join, err := c.coordClient.JoinGroup(ctx, &pb.JoinGroupRequest{
-		GroupId: groupID,
+		GroupId:  groupID,
 		MemberId: memberID,
-		Topic: topic,
+		Topic:    topic,
 	})
 	if err != nil {
 		return fmt.Errorf("join group: %w", err)
@@ -103,14 +103,15 @@ func (c *Consumer) JoinGroup(ctx context.Context, groupID string, memberID strin
 			return fmt.Errorf("dial broker for partition %d: %w", p, err)
 		}
 		c.readers = append(c.readers, &partitionReader{
-			client: brokerClient,
-			topic: topic,
+			client:    brokerClient,
+			topic:     topic,
 			partition: p,
 		})
 	}
 	c.lastRebalanceCheck = time.Now()
 	return nil
 }
+
 // SetDialer allows overriding the default gRPC dialer, used by JoinGroup to connect to assigned partition brokers. Only for testing.
 func (c *Consumer) SetDialer(fn func(ctx context.Context, brokerAddr string) (pb.BrokerClient, error)) {
 	c.dialBroker = fn
@@ -203,7 +204,6 @@ func (c *Consumer) tryRebalance(ctx context.Context) error {
 	return nil
 }
 
-
 // Poll blocks until the next message is available or ctx is cancelled.
 // On stream EOF or transport error it reconnects from the last received offset.
 // When in group mode, Poll periodically re-joins the group to detect rebalances.
@@ -267,16 +267,17 @@ func (c *Consumer) CommitOffsets(ctx context.Context) error {
 	for i, pr := range c.readers {
 		offsets[i] = &pb.PartitionOffset{
 			Partition: pr.partition,
-			Offset: pr.nextOffset,
+			Offset:    pr.nextOffset,
 		}
 	}
 	_, err := c.coordClient.CommitOffsets(ctx, &pb.CommitOffsetsRequest{
 		GroupId: c.groupID,
-		Topic: c.topic,
+		Topic:   c.topic,
 		Offsets: offsets,
 	})
 	return err
 }
+
 // Offset returns the next offset that Poll will request.
 func (c *Consumer) Offset() int64 {
 	return c.nextOffset
@@ -314,9 +315,9 @@ func (c *Consumer) connect(ctx context.Context) error {
 
 // partitionReader manages a Fetch stream for a single partition, used in phase 2 when consumer joins a group and is assigned multiple partitions.
 type partitionReader struct {
-	client pb.BrokerClient
-	topic string
-	partition int32
+	client     pb.BrokerClient
+	topic      string
+	partition  int32
 	nextOffset int64
 
 	stream pb.Broker_FetchClient
@@ -326,8 +327,8 @@ func (pr *partitionReader) poll(ctx context.Context) (*pb.Message, error) {
 	for {
 		if pr.stream == nil {
 			stream, err := pr.client.Fetch(ctx, &pb.FetchRequest{
-				Topic: pr.topic,
-				Partition: pr.partition,
+				Topic:       pr.topic,
+				Partition:   pr.partition,
 				StartOffset: pr.nextOffset,
 			})
 			if err != nil {

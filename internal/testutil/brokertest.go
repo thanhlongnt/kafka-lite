@@ -22,7 +22,7 @@ func StartBroker(t *testing.T) func(context.Context, string) (net.Conn, error) {
 	t.Helper()
 	lis := bufconn.Listen(BufSize)
 	srv := grpc.NewServer()
-	pb.RegisterBrokerServer(srv, broker.New())
+	pb.RegisterBrokerServer(srv, broker.New(1))
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(func() { srv.Stop(); lis.Close() })
 	return func(ctx context.Context, _ string) (net.Conn, error) {

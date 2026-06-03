@@ -142,11 +142,11 @@ func memFactory(t *testing.T) log.Log {
 	return &log.MemLog{}
 }
 
-func TestMemLog_AppendRead(t *testing.T)            { testAppendRead(t, memFactory) }
-func TestMemLog_PartialRead(t *testing.T)            { testPartialRead(t, memFactory) }
-func TestMemLog_OutOfRangeRead(t *testing.T)         { testOutOfRangeRead(t, memFactory) }
-func TestMemLog_Len(t *testing.T)                    { testLen(t, memFactory) }
-func TestMemLog_ConcurrentAppendRead(t *testing.T)   { testConcurrentAppendRead(t, memFactory) }
+func TestMemLog_AppendRead(t *testing.T)           { testAppendRead(t, memFactory) }
+func TestMemLog_PartialRead(t *testing.T)          { testPartialRead(t, memFactory) }
+func TestMemLog_OutOfRangeRead(t *testing.T)       { testOutOfRangeRead(t, memFactory) }
+func TestMemLog_Len(t *testing.T)                  { testLen(t, memFactory) }
+func TestMemLog_ConcurrentAppendRead(t *testing.T) { testConcurrentAppendRead(t, memFactory) }
 
 // FileLog tests
 
@@ -159,11 +159,11 @@ func fileFactory(t *testing.T) log.Log {
 	return fl
 }
 
-func TestFileLog_AppendRead(t *testing.T)            { testAppendRead(t, fileFactory) }
-func TestFileLog_PartialRead(t *testing.T)            { testPartialRead(t, fileFactory) }
-func TestFileLog_OutOfRangeRead(t *testing.T)         { testOutOfRangeRead(t, fileFactory) }
-func TestFileLog_Len(t *testing.T)                    { testLen(t, fileFactory) }
-func TestFileLog_ConcurrentAppendRead(t *testing.T)   { testConcurrentAppendRead(t, fileFactory) }
+func TestFileLog_AppendRead(t *testing.T)           { testAppendRead(t, fileFactory) }
+func TestFileLog_PartialRead(t *testing.T)          { testPartialRead(t, fileFactory) }
+func TestFileLog_OutOfRangeRead(t *testing.T)       { testOutOfRangeRead(t, fileFactory) }
+func TestFileLog_Len(t *testing.T)                  { testLen(t, fileFactory) }
+func TestFileLog_ConcurrentAppendRead(t *testing.T) { testConcurrentAppendRead(t, fileFactory) }
 
 // TestFileLog_PersistAcrossReopen verifies messages survive close and reopen.
 func TestFileLog_PersistAcrossReopen(t *testing.T) {
