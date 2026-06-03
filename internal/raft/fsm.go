@@ -3,7 +3,9 @@ package raft
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"sync"
+	"time"
 
 	"github.com/hashicorp/raft"
 )
@@ -55,6 +57,7 @@ func newFSM() *FSM {
 
 // Apply is called by the Raft library once a log entry is committed.
 func (f *FSM) Apply(l *raft.Log) interface{} {
+	start := time.Now()
 	var cmd Command
 	if err := json.Unmarshal(l.Data, &cmd); err != nil {
 		return err
@@ -80,6 +83,9 @@ func (f *FSM) Apply(l *raft.Log) interface{} {
 			f.state[key] = existing
 		}
 	}
+
+	log.Printf("[FSM] index=%d type=%d topic=%s partition=%d applied in %v",
+		l.Index, cmd.Type, cmd.Topic, cmd.Partition, time.Since(start))
 	return nil
 }
 
