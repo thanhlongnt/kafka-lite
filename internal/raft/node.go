@@ -3,6 +3,7 @@ package raft
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 // Node wraps a Hashicorp Raft instance and exposes the operations the
 // coordinator needs: Apply, Bootstrap, FSM, IsLeader, and LeaderAddr.
 type Node struct {
+	id        string
 	raft      *raft.Raft
 	fsm       *FSM
 	transport raft.Transport
@@ -57,7 +59,7 @@ func NewNode(id, bindAddr, dataDir string) (*Node, error) {
 		return nil, fmt.Errorf("raft: new raft: %w", err)
 	}
 
-	return &Node{raft: r, fsm: fsm, transport: transport}, nil
+	return &Node{id: id, raft: r, fsm: fsm, transport: transport}, nil
 }
 
 // Bootstrap configures the initial cluster membership. Call once on first
@@ -87,6 +89,9 @@ func (n *Node) Apply(cmd Command) error {
 	return nil
 }
 
+// ID returns the node's unique server ID.
+func (n *Node) ID() string { return n.id }
+
 // FSM exposes read access to the FSM state for the coordinator.
 func (n *Node) FSM() *FSM { return n.fsm }
 
@@ -103,5 +108,6 @@ func (n *Node) LeaderAddr() string {
 
 // Shutdown stops the Raft node gracefully.
 func (n *Node) Shutdown() error {
+	log.Printf("[RAFT] node %s shutdown at %v", n.id, time.Now().Format(time.RFC3339Nano))
 	return n.raft.Shutdown().Error()
 }
