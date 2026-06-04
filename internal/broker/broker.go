@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	stdlog "log"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/thanhlongnt/kafka-lite/internal/log"
 	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
+	"github.com/thanhlongnt/kafka-lite/internal/telemetry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -22,11 +24,11 @@ import (
 // Broker manages topics and their partitions and implements the BrokerServer gRPC interface.
 type Broker struct {
 	pb.UnimplementedBrokerServer
-	mu      sync.RWMutex
-	topics  map[string]map[int32]*Partition // sparse: only partitions this broker owns
-	dataDir string                          // empty → in-memory logs; non-empty → file-backed logs
-	id       int32                          // Broker ID
-	selfAddr string                         // own gRPC address, set by Serve
+	mu       sync.RWMutex
+	topics   map[string]map[int32]*Partition // sparse: only partitions this broker owns
+	dataDir  string                          // empty → in-memory logs; non-empty → file-backed logs
+	id       int32                           // Broker ID
+	selfAddr string                          // own gRPC address, set by Serve
 
 	peerClients map[int32]pb.BrokerClient
 	peerConns   map[int32]*grpc.ClientConn
@@ -333,13 +335,20 @@ func (b *Broker) AssignRole(_ context.Context, req *pb.AssignRoleRequest) (*pb.A
 // Serve starts the gRPC server on addr and blocks until it exits.
 // If a coordinator client is configured, also registers a CoordinatorServer proxy so
 // consumers can call JoinGroup/CommitOffsets/GetMetadata on the broker address directly.
-func (b *Broker) Serve(addr string) error {
+func (b *Broker) Serve(addr string, rpcLogger *stdlog.Logger) error {
 	b.selfAddr = addr
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
-	srv := grpc.NewServer()
+
+	opts := []grpc.ServerOption{}
+	if rpcLogger != nil {
+		opts = append(opts, grpc.UnaryInterceptor(telemetry.LoggingUnaryInterceptor(rpcLogger)))
+		opts = append(opts, grpc.StreamInterceptor(telemetry.LoggingStreamInterceptor(rpcLogger)))
+	}
+
+	srv := grpc.NewServer(opts...)
 	pb.RegisterBrokerServer(srv, b)
 	if b.coordClient != nil {
 		pb.RegisterCoordinatorServer(srv, &coordinatorProxy{client: b.coordClient})

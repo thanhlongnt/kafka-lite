@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
+	"os"
 
 	"github.com/thanhlongnt/kafka-lite/internal/broker"
 	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
@@ -17,7 +19,17 @@ func main() {
 	advertise := flag.String("advertise", "", "address to advertise to coordinator (defaults to localhost+port of -addr)")
 	coordAddr := flag.String("coordinator", "", "coordinator gRPC address (phase 2, optional)")
 	id := flag.Int("id", 1, "integer ID of this broker")
+	rpcLog := flag.Bool("rpc-log", false, "enable rpc logging to file")
 	flag.Parse()
+
+	var rpcLogger *log.Logger
+	if *rpcLog {
+		f, err := os.OpenFile(fmt.Sprintf("rpc-broker-%d.log", *id), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err != nil {
+			log.Fatalf("open rpc log file: %v", err)
+		}
+		rpcLogger = log.New(f, "", log.Ltime|log.Lmicroseconds)
+	}
 
 	var b *broker.Broker
 	if *dataDir != "" {
@@ -58,7 +70,7 @@ func main() {
 		log.Printf("kafka-lite broker listening on %s (in-memory)", *addr)
 	}
 
-	if err := b.Serve(*addr); err != nil {
+	if err := b.Serve(*addr, rpcLogger); err != nil {
 		log.Fatalf("broker: %v", err)
 	}
 }

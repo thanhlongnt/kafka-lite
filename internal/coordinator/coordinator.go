@@ -3,12 +3,14 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"sort"
 	"sync"
 
-	kafkaraft "github.com/thanhlongnt/kafka-lite/internal/raft"
 	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
+	kafkaraft "github.com/thanhlongnt/kafka-lite/internal/raft"
+	"github.com/thanhlongnt/kafka-lite/internal/telemetry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -24,13 +26,13 @@ type offsetKey struct {
 type coordinator struct {
 	pb.UnimplementedCoordinatorServer
 
-	mu         sync.RWMutex
-	brokers    []string                       // index-driven round robin
-	brokerIDs  map[string]int32               // addr -> broker ID
-	brokerAddrs map[int32]string              // broker ID -> addr (reverse of brokerIDs)
-	topics     map[string][]*pb.PartitionInfo // topic -> [{partition, broker_addr}, ...]
-	groups     map[string]map[string][]int32  // group -> member -> partitions
-	offsets    map[offsetKey]int64            // (groupID, topic, partition) -> offset
+	mu          sync.RWMutex
+	brokers     []string                       // index-driven round robin
+	brokerIDs   map[string]int32               // addr -> broker ID
+	brokerAddrs map[int32]string               // broker ID -> addr (reverse of brokerIDs)
+	topics      map[string][]*pb.PartitionInfo // topic -> [{partition, broker_addr}, ...]
+	groups      map[string]map[string][]int32  // group -> member -> partitions
+	offsets     map[offsetKey]int64            // (groupID, topic, partition) -> offset
 
 	brokersMu   sync.Mutex
 	brokerConns map[string]pb.BrokerClient // addr -> client
@@ -80,18 +82,26 @@ func NewWithRaft(raftNode *kafkaraft.Node) *coordinator {
 	c.raftNode = raftNode
 	return c
 }
+
 // Test helper to set the broker dialer function.
 func (c *coordinator) SetBrokerDialer(fn func(ctx context.Context, addr string) (pb.BrokerClient, error)) {
 	c.dialBroker = fn
 }
 
 // gRPC server setup
-func (c *coordinator) Serve(addr string) error {
+func (c *coordinator) Serve(addr string, rpcLogger *log.Logger) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	s := grpc.NewServer()
+
+	opts := []grpc.ServerOption{}
+	if rpcLogger != nil {
+		opts = append(opts, grpc.UnaryInterceptor(telemetry.LoggingUnaryInterceptor(rpcLogger)))
+		opts = append(opts, grpc.StreamInterceptor(telemetry.LoggingStreamInterceptor(rpcLogger)))
+	}
+
+	s := grpc.NewServer(opts...)
 	pb.RegisterCoordinatorServer(s, c)
 	return s.Serve(lis)
 }
@@ -139,7 +149,6 @@ func (c *coordinator) CreateTopic(ctx context.Context, req *pb.CreateTopicReques
 	if c.raftNode != nil && !c.raftNode.IsLeader() {
 		return nil, status.Errorf(codes.FailedPrecondition, "not the leader; redirect to %s", c.raftNode.LeaderAddr())
 	}
-
 
 	c.mu.Lock()
 	if _, exists := c.topics[req.Topic]; exists {
@@ -197,7 +206,7 @@ func (c *coordinator) CreateTopic(ctx context.Context, req *pb.CreateTopicReques
 	return &pb.CreateTopicResponse{}, nil
 }
 
-// GetMetadata -> called by producers 
+// GetMetadata -> called by producers
 func (c *coordinator) GetMetadata(_ context.Context, req *pb.MetadataRequest) (*pb.MetadataResponse, error) {
 	// If we're using Raft, read partition info from the FSM state. Otherwise, read from in-memory map.
 	if c.raftNode != nil {
@@ -208,7 +217,7 @@ func (c *coordinator) GetMetadata(_ context.Context, req *pb.MetadataRequest) (*
 		parts := make([]*pb.PartitionInfo, 0, len(byPart))
 		for idx, ps := range byPart {
 			parts = append(parts, &pb.PartitionInfo{
-				Partition: idx,
+				Partition:  idx,
 				BrokerAddr: ps.Primary,
 			})
 		}
