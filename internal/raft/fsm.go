@@ -135,6 +135,23 @@ func (f *FSM) GetTopic(topic string) (map[int32]PartitionState, bool) {
 	}
 	return out, len(out) > 0
 }
+
+// AllTopics returns the distinct topic names present in the FSM state. Used by
+// the coordinator's failover loop, which has no reverse index from broker to
+// led-partitions and has to walk every topic to find the affected ones.
+func (f *FSM) AllTopics() []string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	seen := make(map[string]struct{}, len(f.state))
+	for k := range f.state {
+		seen[k.Topic] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for t := range seen {
+		out = append(out, t)
+	}
+	return out
+}
 // fsmSnapshot implements raft.FSMSnapshot.
 type fsmSnapshot struct {
 	state map[partitionKey]PartitionState

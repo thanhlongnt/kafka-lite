@@ -7,6 +7,7 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"time"
 
 	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
 	kafkaraft "github.com/thanhlongnt/kafka-lite/internal/raft"
@@ -22,6 +23,19 @@ type offsetKey struct {
 	topic     string
 	partition int32
 }
+
+type leoKey struct {
+	brokerID  int32
+	topic     string
+	partition int32
+}
+
+// Default failover-loop timings. Tests override these via SetFailoverTimings.
+const (
+	defaultHeartbeatTick = 2 * time.Second
+	defaultDeadAfter     = 10 * time.Second
+	defaultLeaderGrace   = 3 * time.Second
+)
 
 type coordinator struct {
 	pb.UnimplementedCoordinatorServer
@@ -39,6 +53,26 @@ type coordinator struct {
 
 	raftNode   *kafkaraft.Node
 	dialBroker func(ctx context.Context, addr string) (pb.BrokerClient, error) // for testing
+
+	// Liveness state for auto-failover. lastSeen tracks the wall-clock time of
+	// the most recent Heartbeat from each broker ID; brokerLEO tracks the LEO
+	// it reported for every partition it hosts. leaderSince records when *this*
+	// coordinator most recently became the Raft leader — used to delay declaring
+	// brokers dead immediately after a leader change (the new leader has no
+	// heartbeat history yet).
+	livenessMu  sync.Mutex
+	lastSeen    map[int32]time.Time
+	brokerLEO   map[leoKey]int64
+	leaderSince time.Time
+
+	// Failover-loop tunables. Defaults come from defaultHeartbeatTick /
+	// defaultDeadAfter / defaultLeaderGrace; tests shorten them via
+	// SetFailoverTimings to keep wall-clock short.
+	tick      time.Duration
+	deadAfter time.Duration
+	grace     time.Duration
+
+	failoverCancel context.CancelFunc // set in Serve, called by Stop
 }
 
 // partitionAssignment captures the full primary+backup layout for one partition.
@@ -60,6 +94,11 @@ func New() *coordinator {
 		groups:      make(map[string]map[string][]int32),
 		offsets:     make(map[offsetKey]int64),
 		brokerConns: make(map[string]pb.BrokerClient),
+		lastSeen:    make(map[int32]time.Time),
+		brokerLEO:   make(map[leoKey]int64),
+		tick:        defaultHeartbeatTick,
+		deadAfter:   defaultDeadAfter,
+		grace:       defaultLeaderGrace,
 	}
 	c.dialBroker = func(_ context.Context, addr string) (pb.BrokerClient, error) {
 		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -69,6 +108,18 @@ func New() *coordinator {
 		return pb.NewBrokerClient(conn), nil
 	}
 	return c
+}
+
+// SetFailoverTimings overrides the auto-failover loop timings. Intended for tests
+// only. tick is how often the loop runs; deadAfter is how long without a heartbeat
+// before a broker is declared dead; grace is the cooldown after this coordinator
+// becomes Raft leader before it may declare any broker dead.
+func (c *coordinator) SetFailoverTimings(tick, deadAfter, grace time.Duration) {
+	c.livenessMu.Lock()
+	defer c.livenessMu.Unlock()
+	c.tick = tick
+	c.deadAfter = deadAfter
+	c.grace = grace
 }
 
 // NewExported is an alias for New, used when the caller needs the exported
@@ -103,7 +154,41 @@ func (c *coordinator) Serve(addr string, rpcLogger *log.Logger) error {
 
 	s := grpc.NewServer(opts...)
 	pb.RegisterCoordinatorServer(s, c)
+
+	// Background auto-failover loop. Only runs while this coordinator is the
+	// Raft leader; non-leader ticks just sleep.
+	if c.raftNode != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		c.failoverCancel = cancel
+		go c.runFailoverLoop(ctx)
+	}
+
 	return s.Serve(lis)
+}
+
+// StartFailoverLoop is a test-only entry point for callers that build the gRPC
+// server themselves (instead of calling Serve). Production code reaches the loop
+// via Serve.
+func (c *coordinator) StartFailoverLoop(ctx context.Context) {
+	if c.raftNode == nil {
+		return
+	}
+	loopCtx, cancel := context.WithCancel(ctx)
+	c.livenessMu.Lock()
+	c.failoverCancel = cancel
+	c.livenessMu.Unlock()
+	go c.runFailoverLoop(loopCtx)
+}
+
+// StopFailoverLoop cancels the background loop. Safe to call repeatedly.
+func (c *coordinator) StopFailoverLoop() {
+	c.livenessMu.Lock()
+	cancel := c.failoverCancel
+	c.failoverCancel = nil
+	c.livenessMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // RegisterBroker adds a broker to the coordinator's metadata
@@ -410,42 +495,89 @@ func (c *coordinator) assignLeaderRoles(ctx context.Context, topic string, assig
 				isrIDs = append(isrIDs, id)
 			}
 		}
-		_, _ = cl.AssignRole(ctx, &pb.AssignRoleRequest{
+		// Short per-RPC timeout so a single unresponsive broker can't block
+		// the failover loop running upstream.
+		rpcCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+		_, _ = cl.AssignRole(rpcCtx, &pb.AssignRoleRequest{
 			Topic:     topic,
 			Partition: a.partition,
 			Role:      pb.ReplicaRole_LEADER,
 			Epoch:     epoch,
 			IsrIds:    isrIDs,
 		})
+		cancel()
 	}
 }
 
-// assignFollowerRoles sends AssignRole(FOLLOWER) to each backup broker.
+// assignFollowerRoles sends AssignRole(FOLLOWER) to each backup broker. Brokers
+// we know to be dead (per heartbeat freshness) are skipped — they couldn't
+// receive the role anyway, and waiting for their RPC to time out would block
+// the auto-failover loop.
+//
+// Fan-out runs in parallel because each AssignRole on a follower triggers
+// BecomeFollower → stopBackground, which can wait up to 500ms for the old
+// replicationLoop's non-interruptible sleep to wake. Serial would multiply that
+// across all backups (a full mesh = >5s per failover).
 func (c *coordinator) assignFollowerRoles(ctx context.Context, topic string, assignments []partitionAssignment, epoch int64) {
 	c.mu.RLock()
 	brokerIDs := c.brokerIDs
 	c.mu.RUnlock()
 
+	var wg sync.WaitGroup
 	for _, a := range assignments {
 		leaderID, ok := brokerIDs[a.primary]
 		if !ok {
 			continue
 		}
 		for _, backupAddr := range a.backups {
+			if !c.brokerAlive(backupAddr) {
+				continue
+			}
 			cl := c.brokerClient(backupAddr)
 			if cl == nil {
 				continue
 			}
-			_, _ = cl.AssignRole(ctx, &pb.AssignRoleRequest{
-				Topic:      topic,
-				Partition:  a.partition,
-				Role:       pb.ReplicaRole_FOLLOWER,
-				Epoch:      epoch,
-				LeaderId:   leaderID,
-				LeaderAddr: a.primary,
-			})
+			wg.Add(1)
+			go func(cl pb.BrokerClient, topic string, partition int32, leaderID int32, leaderAddr string) {
+				defer wg.Done()
+				rpcCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				defer cancel()
+				_, _ = cl.AssignRole(rpcCtx, &pb.AssignRoleRequest{
+					Topic:      topic,
+					Partition:  partition,
+					Role:       pb.ReplicaRole_FOLLOWER,
+					Epoch:      epoch,
+					LeaderId:   leaderID,
+					LeaderAddr: leaderAddr,
+				})
+			}(cl, topic, a.partition, leaderID, a.primary)
 		}
 	}
+	wg.Wait()
+}
+
+// brokerAlive returns true if we believe the broker at addr is alive (recent
+// heartbeat) OR if we have no heartbeat data at all (initial-state fallback so
+// CreateTopic still works before any heartbeats land). The auto-failover loop
+// has its own grace period — by the time it fires, lastSeen has had time to
+// fill in.
+func (c *coordinator) brokerAlive(addr string) bool {
+	c.mu.RLock()
+	id, ok := c.brokerIDs[addr]
+	c.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	c.livenessMu.Lock()
+	defer c.livenessMu.Unlock()
+	if len(c.lastSeen) == 0 {
+		return true // pre-heartbeat startup; treat as alive
+	}
+	ts, seen := c.lastSeen[id]
+	if !seen {
+		return false
+	}
+	return time.Since(ts) <= c.deadAfter
 }
 
 // initPartitions -> sends an InitPartition RPC to the broker that owns the partition to initialize it with the topic name and partition index
@@ -520,4 +652,221 @@ func selectBackups(brokers []string, primary string, n int) []string {
 		}
 	}
 	return backups
+}
+
+// ── Auto-failover: heartbeat handler + background loop ───────────────────────
+
+// Heartbeat receives a broker's liveness ping and per-partition LEO snapshot.
+// Only the Raft leader accepts heartbeats; non-leaders return FailedPrecondition
+// with the Raft leader's address, the same redirect shape AlterIsr uses.
+//
+// As a side effect, if the heartbeating broker had been declared dead (last
+// heartbeat older than deadAfter), the leader re-runs assignFollowerRoles for
+// every partition where this broker appears in Backups. That lets a broker
+// process recover after a transient outage and rejoin as a follower without
+// operator intervention.
+func (c *coordinator) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
+	if c.raftNode != nil && !c.raftNode.IsLeader() {
+		return nil, status.Errorf(codes.FailedPrecondition, "not the raft leader; redirect to %s", c.raftNode.LeaderAddr())
+	}
+
+	now := time.Now()
+	c.livenessMu.Lock()
+	prev, hadPrev := c.lastSeen[req.BrokerId]
+	wasDead := hadPrev && now.Sub(prev) > c.deadAfter
+	c.lastSeen[req.BrokerId] = now
+	for _, leo := range req.PartitionLeos {
+		c.brokerLEO[leoKey{brokerID: req.BrokerId, topic: leo.Topic, partition: leo.Partition}] = leo.LogEndOffset
+	}
+	c.livenessMu.Unlock()
+
+	if wasDead && c.raftNode != nil {
+		c.rejoinReturningBroker(ctx, req.BrokerId)
+	}
+	return &pb.HeartbeatResponse{}, nil
+}
+
+// rejoinReturningBroker re-roles a previously-dead broker as a follower for
+// any partition where it appears in Backups in the current FSM state. The
+// existing assignFollowerRoles fan-out already handles the AssignRole RPC.
+func (c *coordinator) rejoinReturningBroker(ctx context.Context, brokerID int32) {
+	c.mu.RLock()
+	addr, ok := c.brokerAddrs[brokerID]
+	c.mu.RUnlock()
+	if !ok {
+		return
+	}
+
+	topics := c.raftNode.FSM().AllTopics()
+	for _, topic := range topics {
+		byPart, ok := c.raftNode.FSM().GetTopic(topic)
+		if !ok {
+			continue
+		}
+		var assignments []partitionAssignment
+		for part, ps := range byPart {
+			isBackup := false
+			for _, b := range ps.Backups {
+				if b == addr {
+					isBackup = true
+					break
+				}
+			}
+			if !isBackup {
+				continue
+			}
+			assignments = append(assignments, partitionAssignment{
+				partition: part,
+				primary:   ps.Primary,
+				backups:   ps.Backups,
+			})
+		}
+		if len(assignments) > 0 {
+			c.assignFollowerRoles(ctx, topic, assignments, 0)
+		}
+	}
+}
+
+// runFailoverLoop is the single background goroutine that watches broker
+// liveness and triggers UpdatePartitionLeader for partitions whose primary
+// has gone silent. Only the Raft leader does anything; non-leader ticks are
+// no-ops.
+func (c *coordinator) runFailoverLoop(ctx context.Context) {
+	wasLeader := false
+	t := time.NewTicker(c.getTick())
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+
+		if c.raftNode == nil || !c.raftNode.IsLeader() {
+			wasLeader = false
+			continue
+		}
+		if !wasLeader {
+			// We just became leader (or this is the first tick where we observe
+			// ourselves as leader). Record the time and skip one tick so brokers
+			// have a chance to start heartbeating us before we declare anyone dead.
+			wasLeader = true
+			c.livenessMu.Lock()
+			c.leaderSince = time.Now()
+			c.livenessMu.Unlock()
+			continue
+		}
+
+		c.livenessMu.Lock()
+		if time.Since(c.leaderSince) < c.grace {
+			c.livenessMu.Unlock()
+			continue
+		}
+		now := time.Now()
+		deadAfter := c.deadAfter
+		var dead []int32
+		for id, ts := range c.lastSeen {
+			if now.Sub(ts) > deadAfter {
+				dead = append(dead, id)
+			}
+		}
+		// Brokers that registered but never heartbeated count as dead too, but
+		// only after the grace window has passed (already enforced above) and
+		// they've had a full deadAfter window to hit us.
+		c.mu.RLock()
+		for id := range c.brokerAddrs {
+			if _, ok := c.lastSeen[id]; !ok {
+				dead = append(dead, id)
+			}
+		}
+		c.mu.RUnlock()
+		c.livenessMu.Unlock()
+
+		for _, id := range dead {
+			c.failOverBrokerPartitions(ctx, id)
+		}
+	}
+}
+
+func (c *coordinator) getTick() time.Duration {
+	c.livenessMu.Lock()
+	defer c.livenessMu.Unlock()
+	if c.tick <= 0 {
+		return defaultHeartbeatTick
+	}
+	return c.tick
+}
+
+// failOverBrokerPartitions scans the FSM for partitions whose primary is the
+// dead broker, picks the surviving backup with the highest LEO for each, and
+// drives UpdatePartitionLeader (which bumps epoch, commits CmdUpdateLeader via
+// Raft, and fans out AssignRole — all existing machinery).
+func (c *coordinator) failOverBrokerPartitions(ctx context.Context, deadID int32) {
+	c.mu.RLock()
+	deadAddr, ok := c.brokerAddrs[deadID]
+	c.mu.RUnlock()
+	if !ok || c.raftNode == nil {
+		return
+	}
+
+	for _, topic := range c.raftNode.FSM().AllTopics() {
+		byPart, ok := c.raftNode.FSM().GetTopic(topic)
+		if !ok {
+			continue
+		}
+		for part, ps := range byPart {
+			if ps.Primary != deadAddr {
+				continue
+			}
+			newPrimary, picked := c.pickNewLeader(topic, part, ps.Backups)
+			if !picked {
+				log.Printf("[FAILOVER] no live backup for %s/%d (primary=%s dead); leaving partition down", topic, part, deadAddr)
+				continue
+			}
+			log.Printf("[FAILOVER] promoting %s for %s/%d (was %s)", newPrimary, topic, part, deadAddr)
+			_, err := c.UpdatePartitionLeader(ctx, &pb.UpdatePartitionLeaderRequest{
+				Topic:      topic,
+				Partition:  part,
+				BrokerAddr: newPrimary,
+			})
+			if err != nil {
+				log.Printf("[FAILOVER] UpdatePartitionLeader %s/%d -> %s: %v", topic, part, newPrimary, err)
+			}
+		}
+	}
+}
+
+// pickNewLeader chooses the live backup with the highest LEO for (topic, part).
+// "Live" means we've heard a heartbeat within deadAfter. Ties go to the broker
+// listed earlier in Backups (the order that selectBackups produced at create
+// time, which gives deterministic test behavior).
+func (c *coordinator) pickNewLeader(topic string, part int32, backups []string) (string, bool) {
+	c.livenessMu.Lock()
+	defer c.livenessMu.Unlock()
+	now := time.Now()
+
+	bestAddr := ""
+	var bestLEO int64 = -1
+	for _, addr := range backups {
+		c.mu.RLock()
+		id, ok := c.brokerIDs[addr]
+		c.mu.RUnlock()
+		if !ok {
+			continue
+		}
+		ts, seen := c.lastSeen[id]
+		if !seen || now.Sub(ts) > c.deadAfter {
+			continue
+		}
+		leo := c.brokerLEO[leoKey{brokerID: id, topic: topic, partition: part}]
+		if leo > bestLEO {
+			bestLEO = leo
+			bestAddr = addr
+		}
+	}
+	if bestAddr == "" {
+		return "", false
+	}
+	return bestAddr, true
 }

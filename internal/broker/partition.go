@@ -337,6 +337,13 @@ func (p *Partition) LeaderEpoch() int64 {
 	return p.leaderEpoch
 }
 
+// LogEndOffset returns the next offset to be appended (the count of records).
+// Used by Broker.HeartbeatLoop to ship per-partition LEO to the coordinator
+// for failover-candidate ranking.
+func (p *Partition) LogEndOffset() int64 {
+	return p.log.LogEndOffset()
+}
+
 // currentISRIDs returns the broker IDs of all in-sync replicas. Must be called with p.mu held.
 func (p *Partition) currentISRIDs() []int32 {
 	ids := make([]int32, 0, len(p.replicas))

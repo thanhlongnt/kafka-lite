@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/thanhlongnt/kafka-lite/internal/log"
 	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
@@ -34,8 +35,10 @@ type Broker struct {
 	peerConns   map[int32]*grpc.ClientConn
 	peerAddrs   map[int32]string // broker ID → address (for ISR reporting)
 
+	coordMu     sync.RWMutex
 	coordClient pb.CoordinatorClient
 	coordConn   *grpc.ClientConn
+	coordPeers  []string // all known coordinator gRPC addresses for leader discovery
 }
 
 // New returns a Broker that stores all messages in memory.
@@ -124,20 +127,43 @@ func (b *Broker) restore() error {
 	return nil
 }
 
+// SetCoordinatorPeers stores the full list of coordinator gRPC addresses so the
+// broker can discover the current Raft leader after a coordinator failover.
+func (b *Broker) SetCoordinatorPeers(peers []string) {
+	b.coordMu.Lock()
+	b.coordPeers = peers
+	b.coordMu.Unlock()
+}
+
+// SetSelfAddr sets the address this broker advertises to the coordinator.
+// Serve sets it automatically; call this in test environments that skip Serve.
+func (b *Broker) SetSelfAddr(addr string) {
+	b.selfAddr = addr
+}
+
 // ConnectCoordinator dials the coordinator and stores the client for proxying and registration.
 // Phase 1 brokers never call this; coordClient stays nil.
 func (b *Broker) ConnectCoordinator(ctx context.Context, addr string, opts ...grpc.DialOption) error {
-	if b.coordConn != nil {
-		_ = b.coordConn.Close()
-	}
 	opts = append([]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}, opts...)
 	conn, err := grpc.NewClient(addr, opts...)
 	if err != nil {
 		return fmt.Errorf("dial coordinator %s: %w", addr, err)
 	}
+	b.coordMu.Lock()
+	if b.coordConn != nil {
+		_ = b.coordConn.Close()
+	}
 	b.coordConn = conn
 	b.coordClient = pb.NewCoordinatorClient(conn)
+	b.coordMu.Unlock()
 	return nil
+}
+
+// coordClientSafe returns the current coordinator client under coordMu.
+func (b *Broker) coordClientSafe() pb.CoordinatorClient {
+	b.coordMu.RLock()
+	defer b.coordMu.RUnlock()
+	return b.coordClient
 }
 
 // CreateTopic creates a topic with the given number of partitions (0..N-1).
@@ -350,8 +376,8 @@ func (b *Broker) Serve(addr string, rpcLogger *stdlog.Logger) error {
 
 	srv := grpc.NewServer(opts...)
 	pb.RegisterBrokerServer(srv, b)
-	if b.coordClient != nil {
-		pb.RegisterCoordinatorServer(srv, &coordinatorProxy{client: b.coordClient})
+	if b.coordClientSafe() != nil {
+		pb.RegisterCoordinatorServer(srv, &coordinatorProxy{b: b})
 
 		// TODO: [Controller/Metadata] When the broker connects to the coordinator,
 		// it should fetch the initial cluster metadata (broker directory, partitions, ISRs)
@@ -378,21 +404,43 @@ func (b *Broker) getPartition(topic string, partition int32) (*Partition, error)
 
 // coordinatorProxy forwards JoinGroup, CommitOffsets, and GetMetadata to the real coordinator.
 // It is registered on the broker's gRPC server so consumers never need the coordinator's address.
+// It holds a pointer to the broker so it always uses the current coordinator client, even after
+// the broker reconnects to a new Raft leader.
 type coordinatorProxy struct {
 	pb.UnimplementedCoordinatorServer
-	client pb.CoordinatorClient
+	b *Broker
 }
 
 func (p *coordinatorProxy) JoinGroup(ctx context.Context, req *pb.JoinGroupRequest) (*pb.JoinGroupResponse, error) {
-	return p.client.JoinGroup(ctx, req)
+	c := p.b.coordClientSafe()
+	if c == nil {
+		return nil, status.Error(codes.Unavailable, "no coordinator connected")
+	}
+	return c.JoinGroup(ctx, req)
 }
 
 func (p *coordinatorProxy) CommitOffsets(ctx context.Context, req *pb.CommitOffsetsRequest) (*pb.CommitOffsetsResponse, error) {
-	return p.client.CommitOffsets(ctx, req)
+	c := p.b.coordClientSafe()
+	if c == nil {
+		return nil, status.Error(codes.Unavailable, "no coordinator connected")
+	}
+	return c.CommitOffsets(ctx, req)
 }
 
 func (p *coordinatorProxy) GetMetadata(ctx context.Context, req *pb.MetadataRequest) (*pb.MetadataResponse, error) {
-	return p.client.GetMetadata(ctx, req)
+	c := p.b.coordClientSafe()
+	if c == nil {
+		return nil, status.Error(codes.Unavailable, "no coordinator connected")
+	}
+	return c.GetMetadata(ctx, req)
+}
+
+func (p *coordinatorProxy) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
+	c := p.b.coordClientSafe()
+	if c == nil {
+		return nil, status.Error(codes.Unavailable, "no coordinator connected")
+	}
+	return c.Heartbeat(ctx, req)
 }
 
 // ConnectToPeer dials a peer broker and caches the gRPC client for replication.
@@ -419,13 +467,123 @@ func (b *Broker) ConnectToPeer(peerID int32, addr string) error {
 	return nil
 }
 
+// HeartbeatLoop sends a Heartbeat to the coordinator every `interval`, carrying
+// this broker's per-partition LogEndOffsets. The coordinator uses the cadence to
+// detect dead brokers and the LEO snapshot to pick the most-caught-up backup
+// when auto-promoting a new partition leader.
+//
+// The loop exits when ctx is canceled. Heartbeat RPC errors are swallowed — the
+// coordinator's failover loop is the source of truth for liveness, and a flaky
+// network just shows up as a missed heartbeat.
+func (b *Broker) HeartbeatLoop(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		b.sendHeartbeat(ctx)
+	}
+}
+
+func (b *Broker) sendHeartbeat(ctx context.Context) {
+	c := b.coordClientSafe()
+	if c == nil {
+		return
+	}
+
+	b.mu.RLock()
+	leos := b.buildPartitionLEOs()
+	addr := b.selfAddr
+	b.mu.RUnlock()
+
+	_, err := c.Heartbeat(ctx, &pb.HeartbeatRequest{
+		BrokerId:      b.id,
+		BrokerAddr:    addr,
+		PartitionLeos: leos,
+	})
+	if err != nil {
+		b.reconnectCoordinator(ctx)
+	}
+}
+
+// buildPartitionLEOs returns the current LEO snapshot for all local partitions.
+// Must be called with b.mu held (at least RLock).
+func (b *Broker) buildPartitionLEOs() []*pb.PartitionLEO {
+	leos := make([]*pb.PartitionLEO, 0, len(b.topics))
+	for topic, parts := range b.topics {
+		for pid, p := range parts {
+			leos = append(leos, &pb.PartitionLEO{
+				Topic:        topic,
+				Partition:    pid,
+				LogEndOffset: p.LogEndOffset(),
+			})
+		}
+	}
+	return leos
+}
+
+// reconnectCoordinator cycles through coordPeers to find the current Raft leader,
+// then commits the connection and re-registers this broker. Called on any heartbeat
+// error so the broker self-heals after a coordinator failover.
+func (b *Broker) reconnectCoordinator(ctx context.Context) {
+	b.coordMu.RLock()
+	peers := make([]string, len(b.coordPeers))
+	copy(peers, b.coordPeers)
+	b.coordMu.RUnlock()
+
+	if len(peers) == 0 {
+		return
+	}
+
+	addr := b.selfAddr
+	b.mu.RLock()
+	leos := b.buildPartitionLEOs()
+	b.mu.RUnlock()
+
+	req := &pb.HeartbeatRequest{BrokerId: b.id, BrokerAddr: addr, PartitionLeos: leos}
+
+	for _, peer := range peers {
+		conn, err := grpc.NewClient(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			continue
+		}
+		client := pb.NewCoordinatorClient(conn)
+		probeCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		_, err = client.Heartbeat(probeCtx, req)
+		cancel()
+		if err != nil {
+			conn.Close()
+			continue
+		}
+		// This peer is the current leader — commit the connection.
+		b.coordMu.Lock()
+		if b.coordConn != nil {
+			b.coordConn.Close()
+		}
+		b.coordConn = conn
+		b.coordClient = client
+		b.coordMu.Unlock()
+		// Re-register since the new leader has an empty broker registry.
+		_, _ = client.RegisterBroker(ctx, &pb.RegisterBrokerRequest{Addr: addr, Id: b.id})
+		return
+	}
+}
+
 // reportISRChange calls AlterIsr on the coordinator to persist the current ISR.
 // It is called from partition background goroutines and must not hold p.mu.
 func (b *Broker) reportISRChange(topic string, partition int32, isrIDs []int32, epoch int64) {
-	if b.coordClient == nil {
+	c := b.coordClientSafe()
+	if c == nil {
 		return
 	}
-	_, _ = b.coordClient.AlterIsr(context.Background(), &pb.AlterIsrRequest{
+	_, _ = c.AlterIsr(context.Background(), &pb.AlterIsrRequest{
 		Topic:     topic,
 		Partition: partition,
 		Epoch:     epoch,
@@ -436,19 +594,21 @@ func (b *Broker) reportISRChange(topic string, partition int32, isrIDs []int32, 
 // Close strictly tears down all peer connections and local partitions.
 func (b *Broker) Close() {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	for _, conn := range b.peerConns {
 		conn.Close()
 	}
-
 	for _, parts := range b.topics {
 		for _, p := range parts {
 			p.Close()
 		}
 	}
+	b.mu.Unlock()
 
+	b.coordMu.Lock()
 	if b.coordConn != nil {
 		b.coordConn.Close()
+		b.coordConn = nil
+		b.coordClient = nil
 	}
+	b.coordMu.Unlock()
 }
