@@ -382,7 +382,9 @@ func (b *Broker) AssignRole(_ context.Context, req *pb.AssignRoleRequest) (*pb.A
 // If a coordinator client is configured, also registers a CoordinatorServer proxy so
 // consumers can call JoinGroup/CommitOffsets/GetMetadata on the broker address directly.
 func (b *Broker) Serve(addr string, rpcLogger *stdlog.Logger) error {
-	b.selfAddr = addr
+	if b.selfAddr == "" {
+		b.selfAddr = addr
+	}
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)

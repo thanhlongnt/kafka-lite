@@ -69,16 +69,34 @@ func main() {
 			registerAddr = "localhost" + *addr
 		}
 
-		conn, err := grpc.NewClient(peers[0], grpc.WithTransportCredentials(insecure.NewCredentials()))
-		if err != nil {
-			log.Fatalf("dial coordinator for registration: %v", err)
+		// Set selfAddr to the advertise address so heartbeats and reconnects use
+		// the externally-reachable address, not the bind address (":port").
+		b.SetSelfAddr(registerAddr)
+
+		// Register with every coordinator peer so the current Raft leader's broker
+		// list is populated regardless of which node holds leadership. RegisterBroker
+		// is not Raft-replicated, so registering only with peers[0] leaves the leader
+		// unknown about this broker when peers[0] is a follower — causing CreateTopic
+		// to see 0 brokers or assign all partitions to the single broker that happened
+		// to reconnect first.
+		registered := false
+		for _, peer := range peers {
+			conn, err := grpc.NewClient(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			if err != nil {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			_, err = pb.NewCoordinatorClient(conn).RegisterBroker(ctx, &pb.RegisterBrokerRequest{Addr: registerAddr, Id: int32(*id)})
+			cancel()
+			conn.Close()
+			if err == nil {
+				registered = true
+			}
 		}
-		_, err = pb.NewCoordinatorClient(conn).RegisterBroker(context.Background(), &pb.RegisterBrokerRequest{Addr: registerAddr, Id: int32(*id)})
-		conn.Close()
-		if err != nil {
-			log.Fatalf("register with coordinator: %v", err)
+		if !registered {
+			log.Fatalf("register with coordinator: could not reach any peer in %v", peers)
 		}
-		log.Printf("registered with coordinator %s as %s", peers[0], registerAddr)
+		log.Printf("registered with all coordinators as %s", registerAddr)
 
 		// Drive broker → coordinator heartbeats so the coordinator's auto-failover
 		// loop knows we're alive and which partition LEOs we hold.

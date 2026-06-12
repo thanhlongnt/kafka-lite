@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	"github.com/thanhlongnt/kafka-lite/internal/consumer"
 	"github.com/thanhlongnt/kafka-lite/internal/producer"
 	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -28,7 +30,8 @@ func main() {
 	coordAddr    := flag.String("coordinator", "", "coordinator gRPC address (enables -route)")
 	topic        := flag.String("topic", "bench", "topic name")
 	partitions   := flag.Int("partitions", 4, "number of partitions")
-	concurrency  := flag.Int("concurrency", 8, "number of producer goroutines")
+	concurrency  := flag.Int("concurrency", runtime.GOMAXPROCS(0), "number of producer goroutines")
+	targetRate   := flag.Int("rate", 0, "target messages/sec across all producers (0 = unlimited)")
 	dur          := flag.Duration("duration", 10*time.Second, "measurement window")
 	msgSize      := flag.Int("msg-size", 128, "message payload size in bytes")
 	route        := flag.Bool("route", false, "hash-route by key via coordinator (requires -coordinator)")
@@ -54,6 +57,10 @@ func main() {
 		fmt.Printf("topic %q ready (%d partitions)\n\n", *topic, *partitions)
 	}
 
+	if err := checkPartitionLayout(ctx, *brokerAddr, *coordAddr, *topic); err != nil {
+		fatalf("partition layout: %v", err)
+	}
+
 	p, err := producer.New(*brokerAddr)
 	if err != nil {
 		fatalf("producer: %v", err)
@@ -61,7 +68,7 @@ func main() {
 	defer p.Close()
 
 	if *coordAddr != "" {
-		p.ConnectCoordinator()
+		p.ConnectCoordinator(*coordAddr)
 	}
 
 	// Open CSV output file if requested.
@@ -81,6 +88,12 @@ func main() {
 	var producedBytes atomic.Int64
 	var consumedMsgs  atomic.Int64
 	var errCount      atomic.Int64
+
+	// Rate limiter shared across all producer goroutines.
+	var limiter *rate.Limiter
+	if *targetRate > 0 {
+		limiter = rate.NewLimiter(rate.Limit(*targetRate), *concurrency)
+	}
 
 	// Per-goroutine cumulative latency slices (for end-of-run percentiles).
 	latBufs := make([][]time.Duration, *concurrency)
@@ -103,9 +116,63 @@ func main() {
 	runCtx, cancel := context.WithTimeout(ctx, *dur)
 	defer cancel()
 
-	// Consumer goroutines — one per partition, streaming from offset 0.
-	// Outer loop reconnects after broker crashes. A 1s backoff prevents tight
-	// spinning when a partition is not yet assigned to the entry broker.
+	// partBroker maps partition index → broker address; populated from coordinator
+	// metadata so each consumer goroutine connects to the broker that owns its
+	// partition rather than always hitting the entry broker.
+	var partBrokerMu sync.RWMutex
+	partBroker := make(map[int32]string)
+
+	// fetchPartBroker refreshes the partition→broker map from the coordinator.
+	// Falls back to the entry broker proxy if no coordinator address is available.
+	fetchPartBroker := func() {
+		var parts []*pb.PartitionInfo
+		if *coordAddr != "" {
+			for _, raw := range strings.Split(*coordAddr, ",") {
+				addr := strings.TrimSpace(raw)
+				if addr == "" {
+					continue
+				}
+				conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if err != nil {
+					continue
+				}
+				rctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				resp, err := pb.NewCoordinatorClient(conn).GetMetadata(rctx, &pb.MetadataRequest{Topic: *topic})
+				cancel()
+				conn.Close()
+				if err != nil {
+					continue
+				}
+				parts = resp.Partitions
+				break
+			}
+		}
+		if parts == nil {
+			conn, err := grpc.NewClient(*brokerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			if err != nil {
+				return
+			}
+			rctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			resp, err := pb.NewCoordinatorClient(conn).GetMetadata(rctx, &pb.MetadataRequest{Topic: *topic})
+			cancel()
+			conn.Close()
+			if err != nil {
+				return
+			}
+			parts = resp.Partitions
+		}
+		partBrokerMu.Lock()
+		for _, p := range parts {
+			partBroker[p.Partition] = p.BrokerAddr
+		}
+		partBrokerMu.Unlock()
+	}
+
+	fetchPartBroker() // initial population before goroutines start
+
+	// Consumer goroutines — one per partition, each routed to the broker that
+	// owns that partition. On error the metadata is refreshed so failovers are
+	// picked up automatically.
 	var consumerWg sync.WaitGroup
 	for i := 0; i < *numConsumers; i++ {
 		partIdx := int32(i % *partitions)
@@ -114,7 +181,15 @@ func main() {
 			defer consumerWg.Done()
 			var resumeOffset int64
 			for runCtx.Err() == nil {
-				c, err := consumer.New(*brokerAddr, *topic, partIdx, resumeOffset)
+				partBrokerMu.RLock()
+				addr := partBroker[partIdx]
+				partBrokerMu.RUnlock()
+				if addr == "" {
+					fetchPartBroker()
+					time.Sleep(time.Second)
+					continue
+				}
+				c, err := consumer.New(addr, *topic, partIdx, resumeOffset)
 				if err != nil {
 					time.Sleep(time.Second)
 					continue
@@ -127,6 +202,7 @@ func main() {
 					}
 					if err != nil {
 						c.Close()
+						fetchPartBroker() // refresh in case broker changed after failover
 						time.Sleep(time.Second)
 						break
 					}
@@ -150,6 +226,11 @@ func main() {
 		go func(partIdx int32, key []byte, latBuf *[]time.Duration) {
 			defer producerWg.Done()
 			for runCtx.Err() == nil {
+				if limiter != nil {
+					if err := limiter.Wait(runCtx); err != nil {
+						return
+					}
+				}
 				start := time.Now()
 				var sendErr error
 				if *route {
@@ -161,16 +242,20 @@ func main() {
 				if runCtx.Err() != nil {
 					return
 				}
-				if sendErr != nil {
-					errCount.Add(1)
-					continue
-				}
-				producedMsgs.Add(1)
-				producedBytes.Add(int64(*msgSize))
+				// Record latency for every attempt — success and failure — so
+				// the percentiles reflect true observed send latency, not just
+				// the happy path.
 				*latBuf = append(*latBuf, elapsed)
 				secLatMu.Lock()
 				secLatBuf = append(secLatBuf, elapsed)
 				secLatMu.Unlock()
+				if sendErr != nil {
+					errCount.Add(1)
+					time.Sleep(10 * time.Millisecond)
+					continue
+				}
+				producedMsgs.Add(1)
+				producedBytes.Add(int64(*msgSize))
 			}
 		}(partIdx, workerKey, latBuf)
 	}
@@ -255,6 +340,77 @@ func main() {
 		fmt.Printf("       latency p50=%.2fms  p99=%.2fms  p99.9=%.2fms\n",
 			ms(p50), ms(p99), ms(p999))
 	}
+}
+
+// checkPartitionLayout fetches metadata for topic, prints the partition→broker
+// table, and returns an error if the distribution is uneven (any broker holds
+// more than ceil(partitions/brokers) partitions).
+func checkPartitionLayout(ctx context.Context, brokerAddr, coordAddrs, topic string) error {
+	var parts []*pb.PartitionInfo
+
+	if coordAddrs != "" {
+		for _, addr := range strings.Split(coordAddrs, ",") {
+			addr = strings.TrimSpace(addr)
+			conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			if err != nil {
+				continue
+			}
+			resp, err := pb.NewCoordinatorClient(conn).GetMetadata(ctx, &pb.MetadataRequest{Topic: topic})
+			conn.Close()
+			if err != nil {
+				continue
+			}
+			parts = resp.Partitions
+			break
+		}
+	}
+	if parts == nil {
+		// Broker exposes GetMetadata via its coordinator proxy.
+		conn, err := grpc.NewClient(brokerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return fmt.Errorf("dial broker: %w", err)
+		}
+		defer conn.Close()
+		resp, err := pb.NewCoordinatorClient(conn).GetMetadata(ctx, &pb.MetadataRequest{Topic: topic})
+		if err != nil {
+			return fmt.Errorf("GetMetadata via broker proxy: %w", err)
+		}
+		parts = resp.Partitions
+	}
+	if len(parts) == 0 {
+		return fmt.Errorf("no partition info returned")
+	}
+
+	// Sort by partition index for stable output.
+	sort.Slice(parts, func(i, j int) bool { return parts[i].Partition < parts[j].Partition })
+
+	// Count partitions per broker and track max.
+	brokerCount := make(map[string]int)
+	for _, p := range parts {
+		brokerCount[p.BrokerAddr]++
+	}
+
+	numBrokers := len(brokerCount)
+	numParts := len(parts)
+	ceil := (numParts + numBrokers - 1) / numBrokers
+
+	fmt.Printf("partition layout (%d partitions across %d brokers, expected ≤%d per broker):\n", numParts, numBrokers, ceil)
+	for _, p := range parts {
+		fmt.Printf("  partition %2d → %s\n", p.Partition, p.BrokerAddr)
+	}
+
+	var uneven []string
+	for addr, count := range brokerCount {
+		if count > ceil {
+			uneven = append(uneven, fmt.Sprintf("%s has %d partitions", addr, count))
+		}
+	}
+	if len(uneven) > 0 {
+		sort.Strings(uneven)
+		return fmt.Errorf("uneven distribution — not all brokers registered before topic creation: %s", strings.Join(uneven, ", "))
+	}
+	fmt.Printf("  distribution OK\n\n")
+	return nil
 }
 
 // ensureTopic creates the topic, ignoring AlreadyExists.

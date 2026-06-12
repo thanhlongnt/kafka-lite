@@ -13,6 +13,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
 from matplotlib.gridspec import GridSpec
 
@@ -53,23 +54,33 @@ def outage_windows(events):
     return windows
 
 
+def permanent_kills(events):
+    """Return sorted list of (elapsed_s, broker_num) for kill_permanent events."""
+    perm = events[events["event"] == "kill_permanent"].copy()
+    perm = perm.sort_values("elapsed_s")
+    return [(row["elapsed_s"], int(row["num"])) for _, row in perm.iterrows()]
+
+
 def main():
     ap = argparse.ArgumentParser(description="Plot kafka-lite benchmark results")
-    ap.add_argument("--data",   required=True, help="per-second CSV from -csv flag")
-    ap.add_argument("--events", default=None,  help="chaos events CSV (optional)")
-    ap.add_argument("--out",    default="bench.png", help="output PNG path")
-    ap.add_argument("--title",  default="kafka-lite throughput benchmark")
+    ap.add_argument("--data",    required=True, help="per-second CSV from -csv flag")
+    ap.add_argument("--events",  default=None,  help="chaos events CSV (optional)")
+    ap.add_argument("--brokers", type=int, default=0,
+                    help="total broker count for 'N remaining' annotations on permanent kills")
+    ap.add_argument("--out",     default="bench.png", help="output PNG path")
+    ap.add_argument("--title",   default="kafka-lite throughput benchmark")
     args = ap.parse_args()
 
-    df     = load_data(args.data)
-    events = load_events(args.events)
+    df      = load_data(args.data)
+    events  = load_events(args.events)
     windows = outage_windows(events)
+    perm    = permanent_kills(events)
 
     t = df["elapsed_s"]
     x_max = t.max() + 1
 
-    fig = plt.figure(figsize=(14, 10))
-    fig.suptitle(args.title, fontsize=14, fontweight="bold", y=0.98)
+    fig = plt.figure(figsize=(14, 10), layout="constrained")
+    fig.suptitle(args.title, fontsize=14, fontweight="bold")
     gs = GridSpec(3, 1, figure=fig, hspace=0.45)
 
     # ── Panel 1: Throughput & Errors ──────────────────────────────────────────
@@ -121,9 +132,23 @@ def main():
             ax.axvline(kill_s,    color="red",   linestyle="--", linewidth=1, alpha=0.7)
             ax.axvline(restart_s, color="green", linestyle="--", linewidth=1, alpha=0.7)
 
+    # ── Permanent-kill overlays (degradation mode) ────────────────────────────
+    total_brokers = args.brokers if args.brokers > 0 else (max(n for _, n in perm) if perm else 0)
+    for i, (t_kill, num) in enumerate(perm):
+        for ax in (ax1, ax2, ax3):
+            ax.axvline(t_kill, color="darkred", linestyle="--", linewidth=1.5, alpha=0.85)
+        remaining = total_brokers - (i + 1)
+        label = f"↓broker-{num}"
+        if remaining >= 0:
+            label += f"\n({remaining} left)"
+        ax1.text(t_kill + 0.3, ax1.get_ylim()[1] * 0.88,
+                 label, color="darkred", fontsize=7, va="top")
+
     # Annotate kill/restart lines on the top panel only.
-    kill_patch    = mpatches.Patch(color="red",   alpha=0.5, label="kill")
-    restart_patch = mpatches.Patch(color="green", alpha=0.5, label="restart")
+    kill_patch    = mpatches.Patch(color="red",     alpha=0.5, label="kill window")
+    restart_patch = mpatches.Patch(color="green",   alpha=0.5, label="restart")
+    perm_patch    = mlines.Line2D([0], [0], color="darkred", linestyle="--",
+                                  linewidth=1.5, label="permanent kill")
 
     # Add kill/restart labels above the top panel.
     for kill_s, restart_s, label in windows:
@@ -132,19 +157,20 @@ def main():
         ax1.text(restart_s + 0.2, ax1.get_ylim()[1] * 0.80,
                  f"↑{label}", color="green", fontsize=7.5, va="top")
 
+    handles1, labels1   = ax1.get_legend_handles_labels()
+    handles1r, labels1r = ax1r.get_legend_handles_labels()
+    extra_patches = []
+    extra_labels  = []
     if windows:
-        handles1, labels1 = ax1.get_legend_handles_labels()
-        handles1r, _ = ax1r.get_legend_handles_labels()
-        ax1.legend(handles1 + handles1r + [kill_patch, restart_patch],
-                   labels1 + ["errors/s", "kill window", "restart"],
-                   loc="upper left", fontsize=9)
-    else:
-        handles1, labels1 = ax1.get_legend_handles_labels()
-        handles1r, labels1r = ax1r.get_legend_handles_labels()
-        ax1.legend(handles1 + handles1r, labels1 + labels1r,
-                   loc="upper left", fontsize=9)
+        extra_patches += [kill_patch, restart_patch]
+        extra_labels  += ["kill window", "restart"]
+    if perm:
+        extra_patches.append(perm_patch)
+        extra_labels.append("permanent kill")
+    ax1.legend(handles1 + handles1r + extra_patches,
+               labels1 + labels1r + extra_labels,
+               loc="upper left", fontsize=9)
 
-    plt.tight_layout(rect=[0, 0, 1, 0.97])
     fig.savefig(args.out, dpi=150, bbox_inches="tight")
     print(f"saved: {args.out}")
 

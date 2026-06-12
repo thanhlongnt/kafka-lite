@@ -1,26 +1,27 @@
 #!/usr/bin/env bash
-# run-routing-bench.sh — build, spin up 5 coordinators + 20 brokers, run throughput test.
+# run-degradation-bench.sh — build, spin up 5 coordinators + 20 brokers, run
+# throughput test while permanently killing brokers one by one.
 #
-# Override any parameter via environment variable before running, e.g.:
-#   CONCURRENCY=40 DURATION=30s bash scripts/run-routing-bench.sh
+# Brokers are killed in order at DEGRADE_INTERVAL-second intervals and never
+# restarted. As each broker dies the coordinator promotes a backup, increasing
+# the load on surviving nodes and causing latency to climb progressively.
 #
-# Enable random crash-and-restart chaos:
-#   CHAOS=1 bash scripts/run-routing-bench.sh
-#   CHAOS=1 CHAOS_MIN_INTERVAL=5 CHAOS_MAX_INTERVAL=10 CHAOS_DOWN_TIME=3 bash scripts/run-routing-bench.sh
+# Usage:
+#   bash scripts/run-degradation-bench.sh
+#   RATE=20000 DURATION=300s DEGRADE_INTERVAL=20 DEGRADE_MAX_KILLS=10 \
+#       bash scripts/run-degradation-bench.sh
 
 # Throughput params
 TOPIC="${TOPIC:-bench}"
 PARTITIONS="${PARTITIONS:-20}"
 CONCURRENCY="${CONCURRENCY:-0}"    # 0 = use GOMAXPROCS default in the binary
 RATE="${RATE:-0}"                  # target msgs/sec total (0 = unlimited closed-loop)
-DURATION="${DURATION:-15s}"
+DURATION="${DURATION:-300s}"       # 5 min default — enough to observe progression
 MSG_SIZE="${MSG_SIZE:-256}"
 
-# Chaos params
-CHAOS="${CHAOS:-0}"
-CHAOS_MIN_INTERVAL="${CHAOS_MIN_INTERVAL:-10}"   # min seconds between kill events
-CHAOS_MAX_INTERVAL="${CHAOS_MAX_INTERVAL:-30}"   # max seconds between kill events
-CHAOS_DOWN_TIME="${CHAOS_DOWN_TIME:-5}"          # seconds a killed process stays down
+# Degradation params
+DEGRADE_INTERVAL="${DEGRADE_INTERVAL:-20}"   # seconds between permanent kills
+DEGRADE_MAX_KILLS="${DEGRADE_MAX_KILLS:-10}" # how many brokers to kill (default half)
 
 set -euo pipefail
 
@@ -37,18 +38,17 @@ COORD_RAFT_BASE=7000
 NUM_BROKERS=20
 BROKER_PORT_BASE=9100
 
-# PID tracking: flat array for cleanup, typed arrays for chaos targeting
 PIDS=()
-COORD_PIDS=()   # indexed [0..NUM_COORDS-1]
-BROKER_PIDS=()  # indexed [0..NUM_BROKERS-1]
+COORD_PIDS=()
+BROKER_PIDS=()
 
 CSV_OUT="${CSV_OUT:-$LOG_DIR/bench.csv}"
-EVENTS_FILE="${EVENTS_FILE:-$LOG_DIR/chaos-events.csv}"
+EVENTS_FILE="${EVENTS_FILE:-$LOG_DIR/degrade-events.csv}"
 
 cleanup() {
     echo ""
     echo "==> stopping..."
-    set +m  # suppress "Killed" job-control notifications
+    set +m
     for pid in "${PIDS[@]}"; do
         kill -9 "$pid" 2>/dev/null || true
     done
@@ -60,7 +60,6 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Kill any leftover processes from a previous run before starting fresh.
 pkill -f kl-broker      2>/dev/null || true
 pkill -f kl-coordinator 2>/dev/null || true
 sleep 0.5
@@ -86,7 +85,7 @@ done
 # ── start functions ───────────────────────────────────────────────────────────
 
 start_coordinator() {
-    local i=$1   # 1-based
+    local i=$1
     local grpc_port=$(( COORD_GRPC_BASE + i - 1 ))
     local raft_port=$(( COORD_RAFT_BASE + i - 1 ))
     local node_id="node$i"
@@ -116,7 +115,7 @@ start_coordinator() {
 }
 
 start_broker() {
-    local i=$1   # 1-based
+    local i=$1
     local port=$(( BROKER_PORT_BASE + i - 1 ))
     local addr="localhost:$port"
 
@@ -131,50 +130,24 @@ start_broker() {
     PIDS+=($pid)
 }
 
-# ── chaos loop ────────────────────────────────────────────────────────────────
+# ── degradation loop ──────────────────────────────────────────────────────────
+# Kills brokers one by one, permanently. Never restarts them.
 
-chaos_loop() {
-    local dead_coords=0
-    local interval_range=$(( CHAOS_MAX_INTERVAL - CHAOS_MIN_INTERVAL + 1 ))
-
-    while true; do
-        sleep $(( RANDOM % interval_range + CHAOS_MIN_INTERVAL ))
-
-        # Bias 2:1 toward brokers over coordinators.
-        if [ $(( RANDOM % 3 )) -lt 2 ]; then
-            local idx=$(( RANDOM % NUM_BROKERS ))
-            local pid="${BROKER_PIDS[$idx]}"
-            local num=$(( idx + 1 ))
-            local elapsed=$(( SECONDS - TEST_START ))
-            echo "[CHAOS] killing broker $num (pid $pid)"
-            echo "$elapsed,kill,broker,$num" >> "$EVENTS_FILE"
-            kill -9 "$pid" 2>/dev/null || true
-            sleep "$CHAOS_DOWN_TIME"
-            local elapsed=$(( SECONDS - TEST_START ))
-            echo "[CHAOS] restarting broker $num"
-            echo "$elapsed,restart,broker,$num" >> "$EVENTS_FILE"
-            start_broker "$num"
-        else
-            # Never exceed 2 dead coordinators simultaneously (quorum requires 3/5).
-            if [ "$dead_coords" -ge 2 ]; then
-                continue
-            fi
-            local idx=$(( RANDOM % NUM_COORDS ))
-            local pid="${COORD_PIDS[$idx]}"
-            local num=$(( idx + 1 ))
-            local elapsed=$(( SECONDS - TEST_START ))
-            echo "[CHAOS] killing coordinator $num (pid $pid)"
-            echo "$elapsed,kill,coordinator,$num" >> "$EVENTS_FILE"
-            kill -9 "$pid" 2>/dev/null || true
-            dead_coords=$(( dead_coords + 1 ))
-            sleep "$CHAOS_DOWN_TIME"
-            local elapsed=$(( SECONDS - TEST_START ))
-            echo "[CHAOS] restarting coordinator $num"
-            echo "$elapsed,restart,coordinator,$num" >> "$EVENTS_FILE"
-            start_coordinator "$num"
-            dead_coords=$(( dead_coords - 1 ))
-        fi
+degradation_loop() {
+    local killed=0
+    local idx=0
+    while [ $killed -lt $DEGRADE_MAX_KILLS ] && [ $idx -lt $NUM_BROKERS ]; do
+        sleep "$DEGRADE_INTERVAL"
+        local pid="${BROKER_PIDS[$idx]}"
+        local num=$(( idx + 1 ))
+        local elapsed=$(( SECONDS - TEST_START ))
+        echo "[DEGRADE] permanently killing broker $num (pid $pid)  elapsed=${elapsed}s  killed=$(( killed + 1 ))/${DEGRADE_MAX_KILLS}"
+        kill -9 "$pid" 2>/dev/null || true
+        echo "$elapsed,kill_permanent,broker,$num" >> "$EVENTS_FILE"
+        killed=$(( killed + 1 ))
+        idx=$(( idx + 1 ))
     done
+    echo "[DEGRADE] done — killed $killed brokers, $(( NUM_BROKERS - killed )) remaining"
 }
 
 # ── start cluster ─────────────────────────────────────────────────────────────
@@ -193,8 +166,6 @@ done
 
 sleep 2
 
-# ── optionally start chaos loop ───────────────────────────────────────────────
-# Initialise events file (header always written so plot script can open it safely).
 echo "elapsed_s,event,type,num" > "$EVENTS_FILE"
 
 # ── throughput test ───────────────────────────────────────────────────────────
@@ -209,23 +180,19 @@ for i in $(seq 1 $NUM_BROKERS); do
 done
 echo ""
 echo ""
-echo "==> throughput test"
-echo "    topic=$TOPIC  partitions=$PARTITIONS  concurrency=${CONCURRENCY:-default}  rate=${RATE:-unlimited}"
-CHAOS_LABEL=""
-[ "$CHAOS" = "1" ] && CHAOS_LABEL="  chaos=on"
-echo "    duration=$DURATION  msg-size=${MSG_SIZE}B  mode=route${CHAOS_LABEL}"
+echo "==> degradation test"
+echo "    topic=$TOPIC  partitions=$PARTITIONS  rate=${RATE:-unlimited}"
+echo "    duration=$DURATION  msg-size=${MSG_SIZE}B  mode=route"
+echo "    killing 1 broker every ${DEGRADE_INTERVAL}s, max ${DEGRADE_MAX_KILLS} kills"
 echo "    CSV output  : $CSV_OUT"
 echo ""
 
-# Set TEST_START before chaos_loop so the subshell inherits it.
 TEST_START=$SECONDS
 export TEST_START
 
-if [ "$CHAOS" = "1" ]; then
-    echo "==> chaos mode enabled (kills every ${CHAOS_MIN_INTERVAL}-${CHAOS_MAX_INTERVAL}s, down for ${CHAOS_DOWN_TIME}s)"
-    chaos_loop &
-    PIDS+=($!)
-fi
+degradation_loop &
+PIDS+=($!)
+
 THROUGHPUT_ARGS=(
     -broker      "$ENTRY_BROKER"
     -coordinator "$COORD_GRPC_LIST"
@@ -241,16 +208,17 @@ if [ "$RATE"        -gt 0 ] 2>/dev/null; then THROUGHPUT_ARGS+=(-rate        "$R
 
 /tmp/kl-throughput "${THROUGHPUT_ARGS[@]}"
 
-# ── auto-plot (skip when PLOT=0, e.g. called from sweep.sh) ──────────────────
-PLOT_OUT="$LOG_DIR/bench.png"
+# ── auto-plot ─────────────────────────────────────────────────────────────────
+PLOT_OUT="$LOG_DIR/bench-degradation.png"
 if [ "${PLOT:-1}" != "0" ] && command -v python3 >/dev/null 2>&1 && [ -f "$ROOT/scripts/plot-bench.py" ]; then
     echo ""
     echo "==> plotting results..."
     python3 "$ROOT/scripts/plot-bench.py" \
-        --data   "$CSV_OUT" \
-        --events "$EVENTS_FILE" \
-        --out    "$PLOT_OUT" \
-        --title  "kafka-lite: ${PARTITIONS}p ${CONCURRENCY}c ${MSG_SIZE}B${CHAOS_LABEL}" \
+        --data    "$CSV_OUT" \
+        --events  "$EVENTS_FILE" \
+        --brokers "$NUM_BROKERS" \
+        --out     "$PLOT_OUT" \
+        --title   "kafka-lite degradation: ${PARTITIONS}p rate=${RATE:-unlimited} ${MSG_SIZE}B (kill every ${DEGRADE_INTERVAL}s, max ${DEGRADE_MAX_KILLS})" \
         && echo "    saved to $PLOT_OUT" \
-        || echo "    plot failed (run manually: python3 scripts/plot-bench.py --data $CSV_OUT)"
+        || echo "    plot failed (run manually: python3 scripts/plot-bench.py --data $CSV_OUT --events $EVENTS_FILE --brokers $NUM_BROKERS)"
 fi
