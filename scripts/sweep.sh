@@ -29,7 +29,11 @@ SWEEP_PNG="${SWEEP_PNG:-}"
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-LOG_DIR="$ROOT/logs"
+if [ "${CHAOS:-0}" = "1" ]; then
+  LOG_DIR="$ROOT/results/sweep-chaos"
+else
+  LOG_DIR="$ROOT/results/sweep"
+fi
 
 [ -z "$SWEEP_CSV" ] && SWEEP_CSV="$LOG_DIR/sweep.csv"
 [ -z "$SWEEP_PNG" ] && SWEEP_PNG="$LOG_DIR/sweep.png"

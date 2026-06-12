@@ -72,12 +72,17 @@ def main():
     args = ap.parse_args()
 
     df      = load_data(args.data)
-    events  = load_events(args.events)
-    windows = outage_windows(events)
-    perm    = permanent_kills(events)
-
     t = df["elapsed_s"]
     x_max = t.max() + 1
+
+    events  = load_events(args.events)
+    # Drop events outside the data window — the chaos/degrade loop may have kept
+    # running after the job finished, and out-of-range text annotations cause
+    # bbox_inches="tight" to produce a very wide image.
+    if not events.empty:
+        events = events[events["elapsed_s"] <= x_max].copy()
+    windows = outage_windows(events)
+    perm    = permanent_kills(events)
 
     fig = plt.figure(figsize=(14, 10), layout="constrained")
     fig.suptitle(args.title, fontsize=14, fontweight="bold")

@@ -26,7 +26,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RAFT_DIR="/tmp/kafka-lite-raft-bench"
-LOG_DIR="$ROOT/logs"
+if [ "${CHAOS:-0}" = "1" ]; then
+  LOG_DIR="$ROOT/results/chaos"
+else
+  LOG_DIR="$ROOT/results/throughput"
+fi
 
 # 5 coordinator nodes: gRPC ports 9093-9097, Raft ports 7000-7004
 NUM_COORDS=5
@@ -145,12 +149,12 @@ chaos_loop() {
             local idx=$(( RANDOM % NUM_BROKERS ))
             local pid="${BROKER_PIDS[$idx]}"
             local num=$(( idx + 1 ))
-            local elapsed=$(( SECONDS - TEST_START ))
+            local elapsed=$(( $(date +%s) - BENCH_EPOCH ))
             echo "[CHAOS] killing broker $num (pid $pid)"
             echo "$elapsed,kill,broker,$num" >> "$EVENTS_FILE"
             kill -9 "$pid" 2>/dev/null || true
             sleep "$CHAOS_DOWN_TIME"
-            local elapsed=$(( SECONDS - TEST_START ))
+            local elapsed=$(( $(date +%s) - BENCH_EPOCH ))
             echo "[CHAOS] restarting broker $num"
             echo "$elapsed,restart,broker,$num" >> "$EVENTS_FILE"
             start_broker "$num"
@@ -162,13 +166,13 @@ chaos_loop() {
             local idx=$(( RANDOM % NUM_COORDS ))
             local pid="${COORD_PIDS[$idx]}"
             local num=$(( idx + 1 ))
-            local elapsed=$(( SECONDS - TEST_START ))
+            local elapsed=$(( $(date +%s) - BENCH_EPOCH ))
             echo "[CHAOS] killing coordinator $num (pid $pid)"
             echo "$elapsed,kill,coordinator,$num" >> "$EVENTS_FILE"
             kill -9 "$pid" 2>/dev/null || true
             dead_coords=$(( dead_coords + 1 ))
             sleep "$CHAOS_DOWN_TIME"
-            local elapsed=$(( SECONDS - TEST_START ))
+            local elapsed=$(( $(date +%s) - BENCH_EPOCH ))
             echo "[CHAOS] restarting coordinator $num"
             echo "$elapsed,restart,coordinator,$num" >> "$EVENTS_FILE"
             start_coordinator "$num"
@@ -217,15 +221,6 @@ echo "    duration=$DURATION  msg-size=${MSG_SIZE}B  mode=route${CHAOS_LABEL}"
 echo "    CSV output  : $CSV_OUT"
 echo ""
 
-# Set TEST_START before chaos_loop so the subshell inherits it.
-TEST_START=$SECONDS
-export TEST_START
-
-if [ "$CHAOS" = "1" ]; then
-    echo "==> chaos mode enabled (kills every ${CHAOS_MIN_INTERVAL}-${CHAOS_MAX_INTERVAL}s, down for ${CHAOS_DOWN_TIME}s)"
-    chaos_loop &
-    PIDS+=($!)
-fi
 THROUGHPUT_ARGS=(
     -broker      "$ENTRY_BROKER"
     -coordinator "$COORD_GRPC_LIST"
@@ -239,7 +234,32 @@ THROUGHPUT_ARGS=(
 if [ "$CONCURRENCY" -gt 0 ] 2>/dev/null; then THROUGHPUT_ARGS+=(-concurrency "$CONCURRENCY"); fi
 if [ "$RATE"        -gt 0 ] 2>/dev/null; then THROUGHPUT_ARGS+=(-rate        "$RATE");        fi
 
-/tmp/kl-throughput "${THROUGHPUT_ARGS[@]}"
+# Run throughput in background so the chaos/degrade loop can be started after
+# the tool's own per-second clock begins.  BENCH_EPOCH aligns event timestamps
+# with the tool's elapsed_s (avoids the ~7s offset from cluster startup time).
+TPUT_LOG="$(mktemp /tmp/kl-tput-XXXX.log)"
+/tmp/kl-throughput "${THROUGHPUT_ARGS[@]}" | tee "$TPUT_LOG" &
+TPUT_PID=$!
+PIDS+=($TPUT_PID)
+
+# Wait until the tool has printed its first second, then record the epoch.
+until grep -qm1 '\[  *1s\]' "$TPUT_LOG" 2>/dev/null; do sleep 0.1; done
+export BENCH_EPOCH=$(( $(date +%s) - 1 ))
+
+if [ "$CHAOS" = "1" ]; then
+    echo "==> chaos mode enabled (kills every ${CHAOS_MIN_INTERVAL}-${CHAOS_MAX_INTERVAL}s, down for ${CHAOS_DOWN_TIME}s)"
+    chaos_loop &
+    CHAOS_PID=$!
+    PIDS+=($CHAOS_PID)
+fi
+
+wait "$TPUT_PID" 2>/dev/null || true
+
+if [ "${CHAOS:-0}" = "1" ] && [ -n "${CHAOS_PID:-}" ]; then
+    kill "$CHAOS_PID" 2>/dev/null || true
+    wait "$CHAOS_PID" 2>/dev/null || true
+fi
+rm -f "$TPUT_LOG"
 
 # ── auto-plot (skip when PLOT=0, e.g. called from sweep.sh) ──────────────────
 PLOT_OUT="$LOG_DIR/bench.png"

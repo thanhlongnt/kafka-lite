@@ -27,7 +27,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RAFT_DIR="/tmp/kafka-lite-raft-bench"
-LOG_DIR="$ROOT/logs"
+LOG_DIR="$ROOT/results/degradation"
 
 # 5 coordinator nodes: gRPC ports 9093-9097, Raft ports 7000-7004
 NUM_COORDS=5
@@ -131,21 +131,26 @@ start_broker() {
 }
 
 # ── degradation loop ──────────────────────────────────────────────────────────
-# Kills brokers one by one, permanently. Never restarts them.
+# Kills brokers one by one in random order. Never restarts them.
 
 degradation_loop() {
+    # Build list of 1-based broker IDs and shuffle kill order via RANDOM.
+    local alive_ids=()
+    for i in $(seq 1 $NUM_BROKERS); do alive_ids+=($i); done
+
     local killed=0
-    local idx=0
-    while [ $killed -lt $DEGRADE_MAX_KILLS ] && [ $idx -lt $NUM_BROKERS ]; do
+    while [ $killed -lt $DEGRADE_MAX_KILLS ] && [ ${#alive_ids[@]} -gt 0 ]; do
         sleep "$DEGRADE_INTERVAL"
-        local pid="${BROKER_PIDS[$idx]}"
-        local num=$(( idx + 1 ))
-        local elapsed=$(( SECONDS - TEST_START ))
+        local rand_pos=$(( RANDOM % ${#alive_ids[@]} ))
+        local num=${alive_ids[$rand_pos]}
+        alive_ids=( "${alive_ids[@]:0:$rand_pos}" "${alive_ids[@]:$((rand_pos+1))}" )
+
+        local pid="${BROKER_PIDS[$((num-1))]}"
+        local elapsed=$(( $(date +%s) - BENCH_EPOCH ))
         echo "[DEGRADE] permanently killing broker $num (pid $pid)  elapsed=${elapsed}s  killed=$(( killed + 1 ))/${DEGRADE_MAX_KILLS}"
         kill -9 "$pid" 2>/dev/null || true
         echo "$elapsed,kill_permanent,broker,$num" >> "$EVENTS_FILE"
         killed=$(( killed + 1 ))
-        idx=$(( idx + 1 ))
     done
     echo "[DEGRADE] done — killed $killed brokers, $(( NUM_BROKERS - killed )) remaining"
 }
@@ -187,12 +192,6 @@ echo "    killing 1 broker every ${DEGRADE_INTERVAL}s, max ${DEGRADE_MAX_KILLS} 
 echo "    CSV output  : $CSV_OUT"
 echo ""
 
-TEST_START=$SECONDS
-export TEST_START
-
-degradation_loop &
-PIDS+=($!)
-
 THROUGHPUT_ARGS=(
     -broker      "$ENTRY_BROKER"
     -coordinator "$COORD_GRPC_LIST"
@@ -206,7 +205,21 @@ THROUGHPUT_ARGS=(
 if [ "$CONCURRENCY" -gt 0 ] 2>/dev/null; then THROUGHPUT_ARGS+=(-concurrency "$CONCURRENCY"); fi
 if [ "$RATE"        -gt 0 ] 2>/dev/null; then THROUGHPUT_ARGS+=(-rate        "$RATE");        fi
 
-/tmp/kl-throughput "${THROUGHPUT_ARGS[@]}"
+# Background throughput; start degradation loop only after the tool's per-second
+# clock begins so event timestamps align with the CSV's elapsed_s column.
+TPUT_LOG="$(mktemp /tmp/kl-tput-XXXX.log)"
+/tmp/kl-throughput "${THROUGHPUT_ARGS[@]}" | tee "$TPUT_LOG" &
+TPUT_PID=$!
+PIDS+=($TPUT_PID)
+
+until grep -qm1 '\[  *1s\]' "$TPUT_LOG" 2>/dev/null; do sleep 0.1; done
+export BENCH_EPOCH=$(( $(date +%s) - 1 ))
+
+degradation_loop &
+PIDS+=($!)
+
+wait "$TPUT_PID" 2>/dev/null || true
+rm -f "$TPUT_LOG"
 
 # ── auto-plot ─────────────────────────────────────────────────────────────────
 PLOT_OUT="$LOG_DIR/bench-degradation.png"

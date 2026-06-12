@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
-# run-minikube-bench.sh — build kafka-lite image into Minikube, deploy
-# 5 coordinators + 20 brokers, run a throughput test, extract CSV, plot.
+# run-minikube-chaos-bench.sh — build kafka-lite image into Minikube, deploy
+# 5 coordinators + 20 brokers, run a throughput test while randomly killing and
+# restarting broker and coordinator pods.
+#
+# Unlike run-minikube-degradation-bench.sh, killed pods are RESTARTED (StatefulSet
+# controller recreates them automatically after --force --grace-period=0 deletion),
+# simulating transient crash-and-recover failures rather than permanent node loss.
 #
 # Requires: minikube (running), kubectl, docker, python3 (optional, for plots)
 #
 # Usage:
-#   bash scripts/run-minikube-bench.sh
-#   RATE=10000 DURATION=60s CONCURRENCY=20 bash scripts/run-minikube-bench.sh
+#   bash scripts/run-minikube-chaos-bench.sh
+#   RATE=10000 DURATION=120s CHAOS_MIN_INTERVAL=10 CHAOS_MAX_INTERVAL=20 \
+#       bash scripts/run-minikube-chaos-bench.sh
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-LOG_DIR="$ROOT/results/throughput"
+LOG_DIR="$ROOT/results/chaos"
 mkdir -p "$LOG_DIR"
 
 # Throughput params
@@ -18,13 +24,19 @@ TOPIC="${TOPIC:-bench}"
 PARTITIONS="${PARTITIONS:-20}"
 CONCURRENCY="${CONCURRENCY:-20}"
 RATE="${RATE:-0}"         # 0 = unlimited closed-loop
-DURATION="${DURATION:-60s}"
+DURATION="${DURATION:-120s}"
 MSG_SIZE="${MSG_SIZE:-256}"
 
-NUM_BROKERS=20
+# Chaos params
+CHAOS_MIN_INTERVAL="${CHAOS_MIN_INTERVAL:-10}"  # min seconds between kill events
+CHAOS_MAX_INTERVAL="${CHAOS_MAX_INTERVAL:-30}"  # max seconds between kill events
+CHAOS_DOWN_TIME="${CHAOS_DOWN_TIME:-5}"         # seconds to wait before checking pod is Ready again
 
-CSV_OUT="${CSV_OUT:-$LOG_DIR/bench-minikube.csv}"
-EVENTS_FILE="${EVENTS_FILE:-$LOG_DIR/bench-minikube-events.csv}"
+NUM_BROKERS=20
+NUM_COORDS=5
+
+CSV_OUT="${CSV_OUT:-$LOG_DIR/bench-minikube-chaos.csv}"
+EVENTS_FILE="${EVENTS_FILE:-$LOG_DIR/chaos-events-minikube.csv}"
 
 # ── preflight ──────────────────────────────────────────────────────────────────
 if ! minikube status --format='{{.Host}}' 2>/dev/null | grep -q "Running"; then
@@ -36,10 +48,12 @@ fi
 # ── cleanup ────────────────────────────────────────────────────────────────────
 JOB_TMP=""
 LOG_TMP=""
+CHAOS_PID=""
 
 cleanup() {
   echo ""
   echo "==> tearing down cluster..."
+  [ -n "$CHAOS_PID" ] && kill "$CHAOS_PID" 2>/dev/null || true
   kubectl delete job/throughput --ignore-not-found 2>/dev/null || true
   kubectl delete -f "$ROOT/k8s/configmap.yaml"   --ignore-not-found 2>/dev/null || true
   kubectl delete -f "$ROOT/k8s/coordinator.yaml" --ignore-not-found 2>/dev/null || true
@@ -47,7 +61,8 @@ cleanup() {
   [ -n "$JOB_TMP" ] && rm -f "$JOB_TMP"
   [ -n "$LOG_TMP" ] && rm -f "$LOG_TMP"
   echo "==> logs left in $LOG_DIR"
-  echo "    bench CSV : $CSV_OUT"
+  echo "    bench CSV   : $CSV_OUT"
+  [ -f "$EVENTS_FILE" ] && echo "    events CSV  : $EVENTS_FILE"
 }
 trap cleanup EXIT INT TERM
 
@@ -121,13 +136,14 @@ printf  "    brokers      : "
 for i in $(seq 0 $((NUM_BROKERS-1))); do printf "broker-%d " "$i"; done
 echo ""
 echo ""
-echo "==> throughput test"
+echo "==> chaos throughput test"
 echo "    topic=$TOPIC  partitions=$PARTITIONS  concurrency=$CONCURRENCY  rate=${RATE:-unlimited}"
-echo "    duration=$DURATION  msg-size=${MSG_SIZE}B  mode=route"
+echo "    duration=$DURATION  msg-size=${MSG_SIZE}B  mode=route  chaos=on"
+echo "    kill interval=${CHAOS_MIN_INTERVAL}-${CHAOS_MAX_INTERVAL}s  down-time=${CHAOS_DOWN_TIME}s"
 echo "    CSV output  : $CSV_OUT"
+echo "    events CSV  : $EVENTS_FILE"
 echo ""
 
-# Empty events file (plotter expects it to exist).
 echo "elapsed_s,event,type,num" >"$EVENTS_FILE"
 
 # ── start Job ──────────────────────────────────────────────────────────────────
@@ -142,11 +158,76 @@ until kubectl get pod "$POD" -o jsonpath='{.status.phase}' 2>/dev/null | grep -q
   sleep 1
 done
 
-# ── stream logs, capturing to file for CSV extraction ─────────────────────────
+# ── chaos loop (background) ────────────────────────────────────────────────────
+# Randomly kills broker or coordinator pods (2:1 bias toward brokers).
+# Pods are part of StatefulSets, so Kubernetes recreates them automatically after
+# the force-delete.  After CHAOS_DOWN_TIME seconds we wait for the pod to be Ready
+# before logging the "restart" event.
+
+chaos_loop() {
+  local dead_coords=0
+  local interval_range=$(( CHAOS_MAX_INTERVAL - CHAOS_MIN_INTERVAL + 1 ))
+
+  while true; do
+    sleep $(( RANDOM % interval_range + CHAOS_MIN_INTERVAL ))
+
+    if [ $(( RANDOM % 3 )) -lt 2 ]; then
+      # Kill a random broker pod.
+      local idx=$(( RANDOM % NUM_BROKERS ))
+      local pod="broker-$idx"
+      local elapsed=$(( $(date +%s) - BENCH_EPOCH ))
+      echo "[CHAOS] killing $pod  elapsed=${elapsed}s"
+      echo "$elapsed,kill,broker,$((idx+1))" >>"$EVENTS_FILE"
+      kubectl delete pod "$pod" --force --grace-period=0 2>/dev/null || true
+      sleep "$CHAOS_DOWN_TIME"
+      local elapsed=$(( $(date +%s) - BENCH_EPOCH ))
+      echo "[CHAOS] $pod restarting...  elapsed=${elapsed}s"
+      echo "$elapsed,restart,broker,$((idx+1))" >>"$EVENTS_FILE"
+      # Wait for StatefulSet controller to recreate and bring Ready; don't block long.
+      kubectl wait pod/"$pod" --for=condition=Ready --timeout=60s 2>/dev/null || true
+    else
+      # Kill a random coordinator pod (never more than 2 simultaneously — quorum needs 3/5).
+      if [ "$dead_coords" -ge 2 ]; then
+        continue
+      fi
+      local idx=$(( RANDOM % NUM_COORDS ))
+      local pod="coordinator-$idx"
+      local elapsed=$(( $(date +%s) - BENCH_EPOCH ))
+      echo "[CHAOS] killing $pod  elapsed=${elapsed}s"
+      echo "$elapsed,kill,coordinator,$((idx+1))" >>"$EVENTS_FILE"
+      kubectl delete pod "$pod" --force --grace-period=0 2>/dev/null || true
+      dead_coords=$(( dead_coords + 1 ))
+      sleep "$CHAOS_DOWN_TIME"
+      local elapsed=$(( $(date +%s) - BENCH_EPOCH ))
+      echo "[CHAOS] $pod restarting...  elapsed=${elapsed}s"
+      echo "$elapsed,restart,coordinator,$((idx+1))" >>"$EVENTS_FILE"
+      kubectl wait pod/"$pod" --for=condition=Ready --timeout=90s 2>/dev/null || true
+      dead_coords=$(( dead_coords - 1 ))
+    fi
+  done
+}
+
+# ── stream logs, aligned to throughput tool's clock ───────────────────────────
+# kubectl logs is backgrounded so we can detect when the tool starts its
+# per-second loop and align chaos event timestamps to elapsed_s.
 LOG_TMP="$(mktemp /tmp/pod-logs-XXXX.txt)"
 echo "==> streaming output from $POD"
 echo ""
-kubectl logs -f "$POD" | tee "$LOG_TMP" || true
+kubectl logs -f "$POD" 2>/dev/null | tee "$LOG_TMP" &
+LOGS_PID=$!
+
+until grep -qm1 '\[  *1s\]' "$LOG_TMP" 2>/dev/null; do sleep 0.1; done
+export BENCH_EPOCH=$(( $(date +%s) - 1 ))
+
+chaos_loop &
+CHAOS_PID=$!
+
+wait "$LOGS_PID" 2>/dev/null || true
+
+# Job finished — stop the chaos loop (it's an infinite loop so we kill it).
+kill "$CHAOS_PID" 2>/dev/null || true
+wait "$CHAOS_PID" 2>/dev/null || true
+CHAOS_PID=""
 
 # ── extract CSV from log markers ───────────────────────────────────────────────
 if awk '/^---CSV_START---/{found=1;next} /^---CSV_END---/{exit} found && /^(elapsed_s|[0-9])/{print}' \
@@ -159,7 +240,7 @@ else
 fi
 
 # ── auto-plot ──────────────────────────────────────────────────────────────────
-PLOT_OUT="$LOG_DIR/bench-minikube.png"
+PLOT_OUT="$LOG_DIR/bench-minikube-chaos.png"
 if [ "${PLOT:-1}" != "0" ] && command -v python3 >/dev/null 2>&1 \
    && [ -f "$ROOT/scripts/plot-bench.py" ] && [ -s "$CSV_OUT" ]; then
   echo ""
@@ -169,7 +250,7 @@ if [ "${PLOT:-1}" != "0" ] && command -v python3 >/dev/null 2>&1 \
     --events  "$EVENTS_FILE" \
     --brokers "$NUM_BROKERS" \
     --out     "$PLOT_OUT" \
-    --title   "kafka-lite (minikube): ${PARTITIONS}p concurrency=${CONCURRENCY} rate=${RATE:-unlimited} ${MSG_SIZE}B ${DURATION}" \
+    --title   "kafka-lite chaos (minikube): ${PARTITIONS}p rate=${RATE:-unlimited} ${MSG_SIZE}B kill every ${CHAOS_MIN_INTERVAL}-${CHAOS_MAX_INTERVAL}s" \
     && echo "    saved to $PLOT_OUT" \
-    || echo "    plot failed (run manually: python3 scripts/plot-bench.py --data $CSV_OUT)"
+    || echo "    plot failed (run manually: python3 scripts/plot-bench.py --data $CSV_OUT --events $EVENTS_FILE)"
 fi

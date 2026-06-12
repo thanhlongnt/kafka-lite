@@ -57,8 +57,12 @@ spec:
           volumeMounts:
             - name: scripts
               mountPath: /scripts
+            - name: broker-data
+              mountPath: /data/broker
       volumes:
         - name: scripts
           configMap:
             name: kafka-lite-scripts
             defaultMode: 0755
+        - name: broker-data
+          emptyDir: {}

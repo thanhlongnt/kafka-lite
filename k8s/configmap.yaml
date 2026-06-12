@@ -32,8 +32,8 @@ data:
       -raft-bind           "$MY_RAFT_ADDR" \
       -data-dir            /data/raft \
       -peers               "$PEERS" \
-      -failover-tick       2s \
-      -failover-dead-after 10s \
+      -failover-tick       1s \
+      -failover-dead-after 5s \
       -failover-grace      3s
 
   start-broker.sh: |
@@ -61,7 +61,8 @@ data:
       -addr      ":9092" \
       -id        "$ID" \
       -advertise "$ADVERTISE" \
-      -coordinator "$COORDS"
+      -coordinator "$COORDS" \
+      -data-dir  /data/broker
 
   start-throughput.sh: |
     #!/bin/sh
@@ -74,7 +75,7 @@ data:
       COORDS="${COORDS:+$COORDS,}coordinator-$i.$COORD_SVC:9093"
     done
 
-    exec /usr/local/bin/throughput \
+    set -- \
       -broker      "broker-0.$BROKER_SVC:9092" \
       -coordinator "$COORDS" \
       -route \
@@ -82,4 +83,19 @@ data:
       -partitions  "${PARTITIONS:-20}" \
       -concurrency "${CONCURRENCY:-20}" \
       -duration    "${DURATION:-60s}" \
-      -msg-size    "${MSG_SIZE:-256}"
+      -msg-size    "${MSG_SIZE:-256}" \
+      -csv         /tmp/bench.csv
+
+    [ "${RATE:-0}" -gt 0 ] 2>/dev/null && set -- "$@" -rate "$RATE"
+
+    /usr/local/bin/throughput "$@"
+
+    # Emit CSV between markers so the caller can extract it from pod logs.
+    # kubectl cp does not work on completed (stopped) containers, so this is
+    # the only reliable way to get structured data out of a finished Job pod.
+    if [ -f /tmp/bench.csv ]; then
+      echo ""
+      echo "---CSV_START---"
+      cat /tmp/bench.csv
+      echo "---CSV_END---"
+    fi
