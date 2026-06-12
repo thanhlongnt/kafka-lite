@@ -41,6 +41,9 @@ PIDS=()
 COORD_PIDS=()   # indexed [0..NUM_COORDS-1]
 BROKER_PIDS=()  # indexed [0..NUM_BROKERS-1]
 
+CSV_OUT="$LOG_DIR/bench.csv"
+EVENTS_FILE="$LOG_DIR/chaos-events.csv"
+
 cleanup() {
     echo ""
     echo "==> stopping..."
@@ -51,6 +54,8 @@ cleanup() {
     wait 2>/dev/null || true
     rm -rf "$RAFT_DIR"
     echo "==> logs left in $LOG_DIR"
+    echo "    bench CSV   : $CSV_OUT"
+    [ -f "$EVENTS_FILE" ] && echo "    events CSV  : $EVENTS_FILE"
 }
 trap cleanup EXIT INT TERM
 
@@ -139,10 +144,14 @@ chaos_loop() {
             local idx=$(( RANDOM % NUM_BROKERS ))
             local pid="${BROKER_PIDS[$idx]}"
             local num=$(( idx + 1 ))
+            local elapsed=$(( SECONDS - TEST_START ))
             echo "[CHAOS] killing broker $num (pid $pid)"
+            echo "$elapsed,kill,broker,$num" >> "$EVENTS_FILE"
             kill -9 "$pid" 2>/dev/null || true
             sleep "$CHAOS_DOWN_TIME"
+            local elapsed=$(( SECONDS - TEST_START ))
             echo "[CHAOS] restarting broker $num"
+            echo "$elapsed,restart,broker,$num" >> "$EVENTS_FILE"
             start_broker "$num"
         else
             # Never exceed 2 dead coordinators simultaneously (quorum requires 3/5).
@@ -152,11 +161,15 @@ chaos_loop() {
             local idx=$(( RANDOM % NUM_COORDS ))
             local pid="${COORD_PIDS[$idx]}"
             local num=$(( idx + 1 ))
+            local elapsed=$(( SECONDS - TEST_START ))
             echo "[CHAOS] killing coordinator $num (pid $pid)"
+            echo "$elapsed,kill,coordinator,$num" >> "$EVENTS_FILE"
             kill -9 "$pid" 2>/dev/null || true
             dead_coords=$(( dead_coords + 1 ))
             sleep "$CHAOS_DOWN_TIME"
+            local elapsed=$(( SECONDS - TEST_START ))
             echo "[CHAOS] restarting coordinator $num"
+            echo "$elapsed,restart,coordinator,$num" >> "$EVENTS_FILE"
             start_coordinator "$num"
             dead_coords=$(( dead_coords - 1 ))
         fi
@@ -180,6 +193,9 @@ done
 sleep 2
 
 # ── optionally start chaos loop ───────────────────────────────────────────────
+# Initialise events file (header always written so plot script can open it safely).
+echo "elapsed_s,event,type,num" > "$EVENTS_FILE"
+
 if [ "$CHAOS" = "1" ]; then
     echo "==> chaos mode enabled (kills every ${CHAOS_MIN_INTERVAL}-${CHAOS_MAX_INTERVAL}s, down for ${CHAOS_DOWN_TIME}s)"
     chaos_loop &
@@ -203,8 +219,10 @@ echo "    topic=$TOPIC  partitions=$PARTITIONS  concurrency=$CONCURRENCY"
 CHAOS_LABEL=""
 [ "$CHAOS" = "1" ] && CHAOS_LABEL="  chaos=on"
 echo "    duration=$DURATION  msg-size=${MSG_SIZE}B  mode=route${CHAOS_LABEL}"
+echo "    CSV output  : $CSV_OUT"
 echo ""
 
+TEST_START=$SECONDS
 /tmp/kl-throughput \
     -broker      "$ENTRY_BROKER" \
     -coordinator "$COORD_GRPC_LIST" \
@@ -213,4 +231,19 @@ echo ""
     -concurrency "$CONCURRENCY" \
     -duration    "$DURATION" \
     -msg-size    "$MSG_SIZE" \
+    -csv         "$CSV_OUT" \
     -route
+
+# ── auto-plot ─────────────────────────────────────────────────────────────────
+PLOT_OUT="$LOG_DIR/bench.png"
+if command -v python3 >/dev/null 2>&1 && [ -f "$ROOT/scripts/plot-bench.py" ]; then
+    echo ""
+    echo "==> plotting results..."
+    python3 "$ROOT/scripts/plot-bench.py" \
+        --data   "$CSV_OUT" \
+        --events "$EVENTS_FILE" \
+        --out    "$PLOT_OUT" \
+        --title  "kafka-lite: ${PARTITIONS}p ${CONCURRENCY}c ${MSG_SIZE}B${CHAOS_LABEL}" \
+        && echo "    saved to $PLOT_OUT" \
+        || echo "    plot failed (run manually: python3 scripts/plot-bench.py --data $CSV_OUT)"
+fi

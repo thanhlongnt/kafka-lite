@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -23,16 +24,17 @@ import (
 )
 
 func main() {
-	brokerAddr  := flag.String("broker", "localhost:9092", "broker gRPC address")
-	coordAddr   := flag.String("coordinator", "", "coordinator gRPC address (enables -route)")
-	topic       := flag.String("topic", "bench", "topic name")
-	partitions  := flag.Int("partitions", 4, "number of partitions")
-	concurrency := flag.Int("concurrency", 8, "number of producer goroutines")
-	dur         := flag.Duration("duration", 10*time.Second, "measurement window")
-	msgSize     := flag.Int("msg-size", 128, "message payload size in bytes")
-	route       := flag.Bool("route", false, "hash-route by key via coordinator (requires -coordinator)")
-	createFlag  := flag.Bool("create", true, "create topic before benchmarking")
+	brokerAddr   := flag.String("broker", "localhost:9092", "broker gRPC address")
+	coordAddr    := flag.String("coordinator", "", "coordinator gRPC address (enables -route)")
+	topic        := flag.String("topic", "bench", "topic name")
+	partitions   := flag.Int("partitions", 4, "number of partitions")
+	concurrency  := flag.Int("concurrency", 8, "number of producer goroutines")
+	dur          := flag.Duration("duration", 10*time.Second, "measurement window")
+	msgSize      := flag.Int("msg-size", 128, "message payload size in bytes")
+	route        := flag.Bool("route", false, "hash-route by key via coordinator (requires -coordinator)")
+	createFlag   := flag.Bool("create", true, "create topic before benchmarking")
 	numConsumers := flag.Int("consumers", 0, "consumer goroutines for e2e mode (0 = same as -partitions)")
+	csvPath      := flag.String("csv", "", "write per-second metrics to this CSV file")
 	flag.Parse()
 
 	if *numConsumers == 0 {
@@ -62,17 +64,34 @@ func main() {
 		p.ConnectCoordinator()
 	}
 
+	// Open CSV output file if requested.
+	var csvWriter *bufio.Writer
+	if *csvPath != "" {
+		f, err := os.Create(*csvPath)
+		if err != nil {
+			fatalf("open csv: %v", err)
+		}
+		defer f.Close()
+		csvWriter = bufio.NewWriter(f)
+		fmt.Fprintln(csvWriter, "elapsed_s,msgs_per_sec,mb_per_sec,errs_per_sec,consume_lag,p50_ms,p99_ms")
+	}
+
 	// Shared counters
 	var producedMsgs  atomic.Int64
 	var producedBytes atomic.Int64
 	var consumedMsgs  atomic.Int64
 	var errCount      atomic.Int64
 
-	// Per-goroutine latency slices — no mutex on hot path.
+	// Per-goroutine cumulative latency slices (for end-of-run percentiles).
 	latBufs := make([][]time.Duration, *concurrency)
 	for i := range latBufs {
 		latBufs[i] = make([]time.Duration, 0, 16384)
 	}
+
+	// Per-second latency buffer — drained by the reporter each tick.
+	// Producers append under secLatMu; reporter swaps the slice out each second.
+	var secLatMu  sync.Mutex
+	var secLatBuf []time.Duration
 
 	// Payload filled with non-zero bytes.
 	payload := make([]byte, *msgSize)
@@ -122,7 +141,6 @@ func main() {
 	var producerWg sync.WaitGroup
 	for i := 0; i < *concurrency; i++ {
 		partIdx := int32(i % *partitions)
-		// Fixed key per worker so metadata cache always hits after the first call.
 		workerKey := []byte(fmt.Sprintf("worker-%d", i))
 		latBuf := &latBufs[i]
 		msg := make([]byte, *msgSize)
@@ -150,6 +168,9 @@ func main() {
 				producedMsgs.Add(1)
 				producedBytes.Add(int64(*msgSize))
 				*latBuf = append(*latBuf, elapsed)
+				secLatMu.Lock()
+				secLatBuf = append(secLatBuf, elapsed)
+				secLatMu.Unlock()
 			}
 		}(partIdx, workerKey, latBuf)
 	}
@@ -170,13 +191,34 @@ func main() {
 				curBytes := producedBytes.Load()
 				curErrs := errCount.Load()
 				lag := curMsgs - consumedMsgs.Load()
-				fmt.Printf("[%3ds] produce: %7d msg/s  %6.2f MB/s  errs/s: %4d | consume lag: %d msgs\n",
-					sec,
-					curMsgs-prevMsgs,
-					float64(curBytes-prevBytes)/1024/1024,
-					curErrs-prevErrs,
-					lag,
-				)
+				deltaMsgs := curMsgs - prevMsgs
+				deltaBytes := curBytes - prevBytes
+				deltaErrs := curErrs - prevErrs
+
+				// Drain per-second latency buffer.
+				secLatMu.Lock()
+				snap := secLatBuf
+				secLatBuf = nil
+				secLatMu.Unlock()
+
+				var p50, p99 float64
+				if len(snap) > 0 {
+					sort.Slice(snap, func(i, j int) bool { return snap[i] < snap[j] })
+					p50 = ms(snap[clamp(len(snap)*50/100, 0, len(snap)-1)])
+					p99 = ms(snap[clamp(len(snap)*99/100, 0, len(snap)-1)])
+				}
+
+				fmt.Printf("[%3ds] produce: %7d msg/s  %6.2f MB/s  errs/s: %4d  p50=%5.2fms p99=%6.2fms | lag: %d\n",
+					sec, deltaMsgs, float64(deltaBytes)/1024/1024,
+					deltaErrs, p50, p99, lag)
+
+				if csvWriter != nil {
+					fmt.Fprintf(csvWriter, "%d,%d,%.4f,%d,%d,%.4f,%.4f\n",
+						sec, deltaMsgs, float64(deltaBytes)/1024/1024,
+						deltaErrs, lag, p50, p99)
+					csvWriter.Flush()
+				}
+
 				prevMsgs = curMsgs
 				prevBytes = curBytes
 				prevErrs = curErrs
@@ -185,10 +227,10 @@ func main() {
 	}()
 
 	producerWg.Wait()
-	cancel()           // stop consumers
+	cancel()
 	consumerWg.Wait()
 
-	// Merge per-goroutine latency slices and compute percentiles.
+	// Merge per-goroutine latency slices and compute overall percentiles.
 	var all []time.Duration
 	for _, buf := range latBufs {
 		all = append(all, buf...)
@@ -248,7 +290,6 @@ func ensureTopic(ctx context.Context, brokerAddr, coordAddrs, topic string, part
 		if err == nil || status.Code(err) == codes.AlreadyExists {
 			return nil
 		}
-		// FailedPrecondition = not the Raft leader; try the next address.
 		if status.Code(err) == codes.FailedPrecondition {
 			lastErr = err
 			continue
