@@ -91,9 +91,9 @@ Same suite is run twice via a factory, once against `MemLog` and once against `F
 
 ## Phase 3 — Raft + ISR + replication (`tests/phase3_test.go`)
 
-`go test ./tests/ -run Phase3 -v -timeout 180s` — **9 / 9 pass, 61s wall clock.**
+`go test ./tests/ -run Phase3 -v -timeout 180s` — **9 / 9 pass, 56s wall clock.**
 
-The slow cases (`ISRFollowerCrash`, `NonISRFollowerCrash`, `FollowerRejoinsISR`) each cost ~11s because they wait through the broker's hard-coded 10s ISR shrink timeout (`internal/broker/partition.go:163`).
+`ISRFollowerCrash` now runs in ~5s: the fast-path `scheduleReplicaEviction` goroutine fires after `max(2s, isrTimeout/2) = 5s` (default `isrTimeout=10s`), well before `monitorISR`'s 10s tick. `NonISRFollowerCrash` and `FollowerRejoinsISR` each cost ~11s because they still wait through the full 10s `monitorISR` cycle (no active `FetchReplica` stream to close, so no fast path).
 
 | Test | Time | What it covers |
 |---|---|---|
@@ -103,7 +103,7 @@ The slow cases (`ISRFollowerCrash`, `NonISRFollowerCrash`, `FollowerRejoinsISR`)
 | `TestPhase3_BrokerReplicationBasic` | 0.01s | Leader produces 10 messages; follower's `FetchReplica` stream catches up; follower's own consumer reads all 10 (HW advanced via replication). |
 | `TestPhase3_HWBlocksUntilReplicated` | 0.21s | Without a follower in the ISR, `Fetch` blocks past the leader's tail; once the follower joins and acks, HW advances and the consumer unblocks. |
 | `TestPhase3_NoDataLossonBrokerLeaderCrash` | 0.51s | Same as `BrokerFailover` from the data-loss angle: all pre-crash messages readable on the new leader. |
-| `TestPhase3_ISRFollowerCrash` | 11.00s | Kill a follower that was in the ISR; leader's `monitorISR` drops it after 10s; recovery time is reported in `[METRIC]` log lines. |
+| `TestPhase3_ISRFollowerCrash` | 5.01s | Kill a follower that was in the ISR; `scheduleReplicaEviction` fast-path fires after 5s (`isrTimeout/2`); recovery time reported in `[METRIC]` log lines. |
 | `TestPhase3_NonISRFollowerCrash` | 11.01s | Kill a follower that's already out of the ISR; produces are not slowed (zero impact confirmed). |
 | `TestPhase3_FollowerRejoinsISR` | 12.21s | Force a follower out of the ISR, then resume replication; the follower rejoins the ISR and all messages remain consistent. |
 

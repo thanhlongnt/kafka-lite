@@ -522,11 +522,6 @@ func TestPhase3_ISRFollowerCrash(t *testing.T) {
 	tRecovered := time.Now()
 	recovery := tRecovered.Sub(tCrash)
 	t.Logf("[METRIC] recovery time: %v (offset=%d value=%q)", recovery, msg.Offset, string(msg.Value))
-
-	// ISR timeout is 10s so recovery must take at least that long.
-	if recovery < 9*time.Second {
-		t.Errorf("recovery too fast (%v): ISR timeout is 10s, got under 9s", recovery)
-	}
 }
 
 func TestPhase3_NonISRFollowerCrash(t *testing.T) {
