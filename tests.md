@@ -10,7 +10,7 @@ go test ./tests/ -run Phase3 -v -timeout 180s         # integration phase 3
 go test ./tests/ -run Chaos -v -timeout 300s         # chaos / auto-failover
 ```
 
-Last full run: 2026-06-11 on macOS (Darwin 25.5.0), Go 1.25.5.
+Last full run: 2026-06-11 on macOS (Darwin 25.5.0), Go 1.25.5. All suites clean; chaos suite 8/8.
 
 ## Unit tests (`internal/...`)
 
@@ -109,25 +109,66 @@ The slow cases (`ISRFollowerCrash`, `NonISRFollowerCrash`, `FollowerRejoinsISR`)
 
 ## Chaos suite, 20 brokers × 5 coordinators (`tests/chaos_test.go`)
 
-`go test ./tests/ -run Chaos -v -timeout 300s` — **6 / 6 pass, ~77s wall clock.**
+`go test ./tests/ -run Chaos -v -timeout 300s` — **8 / 8 pass, ~110s wall clock.**
 
-Opt-in; not in CI. Each test spins up a fresh `chaosEnv` fixture (5 Raft coordinator nodes + 20 brokers, all in-process on TCP loopback). Test timings override the production defaults (heartbeat 200ms, `deadAfter` 1s, `leaderGrace` 2s, failover budget 6s) to keep wall-clock short.
+Opt-in; not in CI. Each test spins up a fresh `chaosEnv` fixture (5 Raft coordinator nodes + 20 brokers, all in-process on TCP loopback). Test timings override production defaults: coordinator heartbeat tick 200ms, `deadAfter` 1s, `leaderGrace` 2s, broker heartbeat 200ms, ISR timeout 4s (2s fast-path eviction grace), failover budget 6s.
 
-| Test | Time | What it covers |
+Note: most of each test's wall-clock time is `newChaosEnv` setup (25 TCP servers, Raft bootstrap, 20 broker registrations). The `[METRIC]` lines in the output show actual recovery elapsed time from the moment of the kill.
+
+Tests are organized under the four failure scenarios from `docs/architecture.md`.
+
+### Scenario 1 — Coordinator primary (Raft leader) dies
+
+| Test | Wall time | Recovery time (measured) | What it verifies |
+|---|---|---|---|
+| `TestChaos_CoordinatorLeaderCrashKeepsDataPlane` | 44s | Raft election: **2.82s**; data-plane produce: **2.82s** (coordinator not involved) | Kill Raft leader coordinator; new leader elected; producers with cached broker addresses keep writing uninterrupted; FSM partition state preserved on new leader. |
+| `TestChaos_CoordinatorLeaderCrashBrokerAutoReconnects` | 23s | Raft election: **2.51s**; CreateTopic on new leader: **2.75s** | After Raft leader change, brokers detect failed heartbeat → `reconnectCoordinator` probes peer list → finds new leader → `RegisterBroker`. `CreateTopic` succeeds without manual re-registration. |
+
+**Observed recovery time:** Raft election ~2.5s; brokers reconnect within one heartbeat tick after that; CreateTopic available ~2.75s after kill.
+
+### Scenario 2 — Coordinator backup (Raft follower) dies
+
+| Test | Wall time | Recovery time (measured) | What it verifies |
+|---|---|---|---|
+| `TestChaos_CoordinatorBackupDies` | 22s | kill #1: **347ms**; kill #2: **341ms** (includes 300ms settle sleep) | Kill followers one at a time. After each kill (while quorum holds): Raft leader unchanged, `CreateTopic` succeeds, `Produce` succeeds. Stops at 2 follower kills (3 nodes alive) to leave quorum intact. |
+| `TestChaos_CoordinatorQuorumLoss` | 1.5s | **0ms** — leader gone immediately on kill | Kill 3 of 5 coordinators; quorum lost; `CreateTopic` against survivors fails with `FailedPrecondition`. Data plane unaffected (broker-direct). Skipped under `-short`. |
+
+**Observed behavior:** Killing 1–2 followers causes zero visible disruption — leader unchanged, CreateTopic+Produce still succeed within the 300ms settle window. Killing 3 breaks Raft commit; cluster management halts immediately.
+
+### Scenario 3 — Broker primary (partition leader) dies
+
+| Test | Wall time | Recovery time (measured) | What it verifies |
+|---|---|---|---|
+| `TestChaos_LeaderCrashAutoFailover` | 4.4s | **1.71s** | Kill partition leader; coordinator's heartbeat-silence path detects it (within `chaosDeadAfter=1s`); highest-LEO backup promoted; pre-crash messages preserved; fresh writes succeed. |
+| `TestChaos_LeaderCrashFastDetection` | 4.1s | **2.42s** | Kill partition leader after a follower has an active `FetchReplica` stream. Follower's stream break triggers `ReportLeaderUnreachable`; coordinator fails over without waiting for `deadAfter`. |
+| `TestChaos_RollingBrokerRestart` | 7s | round 0: **2.22s**; round 1: **1.21s**; round 2: **1.10s** | Kill 3 leader brokers in succession; auto-failover promotes a backup each time. All messages from all rounds readable from the final leader — no data loss across repeated failovers. Skipped under `-short`. |
+
+**Observed recovery time:** 1.1–2.4s across all runs. The `ReportLeaderUnreachable` fast-path and the `deadAfter=1s` heartbeat path converge on similar latency at this scale.
+
+### Scenario 4 — Broker backup (partition follower) dies
+
+| Test | Wall time | Recovery time (measured) | What it verifies |
+|---|---|---|---|
+| `TestChaos_FollowerCrashShrinksISR` | 3.4s | ISR shrunk: **2.11s** | Kill a follower broker that has an active `FetchReplica` stream. Leader's `FetchReplica` handler close triggers `scheduleReplicaEviction` (2s grace); ISR shrinks in FSM; HW unfreezes. Produces against the leader continue throughout. Skipped under `-short`. |
+
+**Observed recovery time:** 2.11s from kill to ISR shrunk in FSM. HW unfreezes at that point, unblocking any pending `Fetch` calls.
+
+### Recovery timing summary
+
+| Failure | Recovery time (measured) | Mechanism |
 |---|---|---|
-| `TestChaos_FollowerCrashShrinksISR` | ~13s | Kill one backup broker for a partition; within ~12s the FSM (via the Raft leader's `FSM().Get`) drops it from the ISR while a steady-drip producer keeps live followers in-sync. Skipped under `-short`. |
-| `TestChaos_LeaderCrashAutoFailover` | ~5s | Kill the partition leader; the coordinator's auto-failover loop (broker heartbeats → highest-LEO selection → `UpdatePartitionLeader` → `CmdUpdateLeader` → role fan-out) promotes a surviving backup within the failover budget. Pre-crash data is preserved; fresh writes against the new leader succeed. |
-| `TestChaos_CoordinatorLeaderCrashKeepsDataPlane` | ~35s | Kill the Raft leader coordinator; a new one is elected within 10s; producers with cached broker clients keep producing directly; FSM partition placement is preserved on the new leader (polled with a 3s retry budget to avoid racing `IsLeader()` vs FSM apply). |
-| `TestChaos_CoordinatorLeaderCrashBrokerAutoReconnects` | ~14s | Kill the Raft leader coordinator; within one heartbeat interval (~200ms in chaos timings) every broker's `reconnectCoordinator` probes the peer list, finds the new leader, and re-registers. `CreateTopic` must succeed on the new leader within `chaosFailoverBudget` without any manual re-registration call. Replaces `TestChaos_CoordinatorLeaderCrashLosesBrokerRegistry` which documented the pre-fix limitation. |
-| `TestChaos_CoordinatorQuorumLoss` | ~2s | Kill 3 of 5 coordinators; no surviving node can become leader; `CreateTopic` against any survivor fails with `FailedPrecondition`. Skipped under `-short`. |
-| `TestChaos_RollingBrokerRestart` | ~9s | Kill 3 leader brokers in succession; auto-failover (not manual `UpdatePartitionLeader`) promotes a backup each time. Total messages produced across all rounds equal those consumed from the final leader — no data loss through repeated auto-failovers. Skipped under `-short`. |
+| Coordinator primary dies | **2.75s** to CreateTopic | Raft election ~2.5s; brokers reconnect on next heartbeat tick; `leaderGrace=2s` |
+| Coordinator backup dies (quorum intact) | **<350ms** (no real disruption) | Leader unchanged; the settle sleep dominates |
+| Coordinator backup dies (quorum lost) | **0ms** (immediate failure) | Raft writes fail; data plane unaffected |
+| Broker primary dies | **1.1–2.4s** | `ReportLeaderUnreachable` from followers + `deadAfter=1s` heartbeat path |
+| Broker backup dies (ISR shrink) | **2.11s** HW freeze | `scheduleReplicaEviction` fires after 2s grace on `FetchReplica` stream close |
 
 ### Tests intentionally deleted or replaced
 
 - `TestChaos_LeaderCrashWithoutFailover` — asserted "leader dies, produces fail, no recovery." Now contradicted by auto-failover.
 - `TestChaos_LeaderCrashWithManualFailover` — asserted "leader dies, test manually calls `UpdatePartitionLeader`, recovery succeeds." Now redundant; the failover loop is the sole caller.
-- `TestChaos_CoordinatorLeaderCrashLosesBrokerRegistry` — documented that the new coordinator's in-memory broker registry was empty after a leader change and `CreateTopic` failed until brokers re-registered manually. Replaced by `TestChaos_CoordinatorLeaderCrashBrokerAutoReconnects`, which asserts the opposite: brokers self-heal within one heartbeat tick. Note: the registry is still NOT Raft-replicated — the new leader still starts empty — but brokers automatically re-register via `reconnectCoordinator`.
+- `TestChaos_CoordinatorLeaderCrashLosesBrokerRegistry` — documented that `CreateTopic` fails after a coordinator leader change until brokers re-register manually. Replaced by `TestChaos_CoordinatorLeaderCrashBrokerAutoReconnects`; brokers now self-heal via `reconnectCoordinator`. The registry is still not Raft-replicated — the new leader starts empty — but brokers re-register automatically within one heartbeat tick.
 
 ## CI
 
-`.github/workflows/ci.yml` runs `go build ./...`, `go test -race ./internal/...`, and each of Phase 1, 2, 3 (with the same timeouts as above). Phase 4 stays opt-in — its 10s ISR timeouts and chaos timings cost more than the rest of CI combined.
+`.github/workflows/ci.yml` runs `go build ./...`, `go test -race ./internal/...`, and each of Phase 1, 2, 3 (with the same timeouts as above). The chaos suite stays opt-in — spinning up 20 brokers and 5 coordinator Raft nodes costs more than the rest of CI combined.

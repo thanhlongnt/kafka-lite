@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/raft"
 	"github.com/thanhlongnt/kafka-lite/internal/coordinator"
@@ -19,6 +20,9 @@ func main() {
 	dataDir := flag.String("data-dir", "./raft-data", "raft data directory")
 	peers := flag.String("peers", "", "comma-separated id=addr pairs, e.g. node2=127.0.0.1:7001,node3=127.0.0.1:7002")
 	rpcLog := flag.Bool("rpc-log", false, "enable rpc logging to file")
+	failoverTick := flag.Duration("failover-tick", 2*time.Second, "how often the failover loop checks broker liveness")
+	failoverDeadAfter := flag.Duration("failover-dead-after", 10*time.Second, "silence before a broker is declared dead")
+	failoverGrace := flag.Duration("failover-grace", 3*time.Second, "grace window after this coordinator becomes Raft leader")
 	flag.Parse()
 
 	var rpcLogger *log.Logger
@@ -55,7 +59,8 @@ func main() {
 	_ = node.Bootstrap(servers)
 
 	c := coordinator.NewWithRaft(node)
-	log.Printf("starting raft coordinator on %s (raft: %s)", *addr, *raftBind)
+	c.SetFailoverTimings(*failoverTick, *failoverDeadAfter, *failoverGrace)
+	log.Printf("starting raft coordinator on %s (raft: %s, dead-after: %s)", *addr, *raftBind, *failoverDeadAfter)
 	if err := c.Serve(*addr, rpcLogger); err != nil {
 		log.Fatalf("coordinator: %v", err)
 	}

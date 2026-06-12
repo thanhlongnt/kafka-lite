@@ -97,6 +97,7 @@ service Coordinator {
   rpc UpdatePartitionLeader(UpdatePartitionLeaderRequest) returns (UpdatePartitionLeaderResponse);
   rpc AlterIsr(AlterIsrRequest) returns (AlterIsrResponse);
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc ReportLeaderUnreachable(ReportLeaderUnreachableRequest) returns (ReportLeaderUnreachableResponse);
 }
 
 message PartitionLEO {
@@ -176,3 +177,10 @@ message InitPartitionsRequest {
   repeated int32 partitions = 2;
 }
 message InitPartitionsResponse {}
+
+message ReportLeaderUnreachableRequest {
+  string leader_addr = 1;
+  string topic       = 2;
+  int32  partition   = 3;
+}
+message ReportLeaderUnreachableResponse {}

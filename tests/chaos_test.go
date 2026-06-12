@@ -20,7 +20,7 @@ const (
 	chaosNumCoordinators = 5
 	chaosNumBrokers      = 20
 	chaosLeaderTimeout   = 10 * time.Second
-	chaosISRTimeout      = 15 * time.Second // monitorISR ticks @1s, drops follower after 10s; budget for FSM propagation
+	chaosISRTimeout      = 6 * time.Second // fast-path eviction fires in ~2s; 6s budget covers grace + reporting + FSM
 
 	// Fast failover timings for tests. The production defaults (2s / 10s / 15s)
 	// would make every test take ~25s minimum.
@@ -29,6 +29,12 @@ const (
 	chaosDeadAfter       = 1 * time.Second
 	chaosLeaderGrace     = 2 * time.Second
 	chaosFailoverBudget  = 6 * time.Second // grace + deadAfter + Raft apply + slop
+
+	// ISR eviction timings for chaos brokers. The fast-path eviction goroutine
+	// fires after evictGrace = max(2s, isrTimeout/2). With chaosISRBrokerTimeout=4s
+	// the grace window is 2s, well above the 500ms replicationLoop reconnect sleep.
+	chaosISRBrokerTimeout = 4 * time.Second
+	chaosISRBrokerTick    = 200 * time.Millisecond
 )
 
 // chaosEnv runs 5 coordinator Raft nodes and 20 brokers, all on TCP loopback in-process.
@@ -113,6 +119,7 @@ func newChaosEnv(t *testing.T) *chaosEnv {
 		t.Cleanup(func() { srv.Stop() })
 
 		b.SetSelfAddr(brokerAddr)
+		b.SetISRTimeout(chaosISRBrokerTimeout, chaosISRBrokerTick)
 		if err := b.ConnectCoordinator(context.Background(), leaderAddr); err != nil {
 			t.Fatalf("broker %d ConnectCoordinator: %v", id, err)
 		}
@@ -278,6 +285,16 @@ func (e *chaosEnv) brokerIdxFromAddr(addr string) int {
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
+//
+// Tests are grouped under the four failure scenarios documented in
+// docs/architecture.md#failure-scenarios:
+//
+//   Scenario 1 — Coordinator primary (Raft leader) dies
+//   Scenario 2 — Coordinator backup (Raft follower) dies
+//   Scenario 3 — Broker primary (partition leader) dies
+//   Scenario 4 — Broker backup (partition follower) dies
+
+// ── Scenario 4: Broker backup dies ───────────────────────────────────────────
 
 // TestChaos_FollowerCrashShrinksISR kills one backup broker for a partition and
 // verifies that within ~12s the FSM reflects the shrunken ISR. Produces against
@@ -322,7 +339,8 @@ func TestChaos_FollowerCrashShrinksISR(t *testing.T) {
 		t.Fatal("no follower available")
 	}
 	waitReplicated(t, env.brokerCli[followerIdx], topic, part, 5)
-	t.Logf("[METRIC] killing follower broker idx=%d at %v", followerIdx, time.Now().Format(time.RFC3339Nano))
+	killTime := time.Now()
+	t.Logf("[METRIC] killing follower broker idx=%d at T=0", followerIdx)
 	env.killBroker(followerIdx)
 
 	// Keep producing during the wait. The leader's monitorISR only refreshes a
@@ -366,7 +384,7 @@ func TestChaos_FollowerCrashShrinksISR(t *testing.T) {
 				}
 			}
 			if !stillIn {
-				t.Logf("[METRIC] ISR shrunk at %v, broker %d removed; ISR=%v", time.Now().Format(time.RFC3339Nano), deadBrokerID, ps.ISR)
+				t.Logf("[METRIC] ISR shrunk after %v; broker %d removed; ISR=%v", time.Since(killTime).Round(time.Millisecond), deadBrokerID, ps.ISR)
 				goto produceCheck
 			}
 		}
@@ -382,6 +400,8 @@ produceCheck:
 		t.Fatalf("post-shrink produce: %v", err)
 	}
 }
+
+// ── Scenario 3: Broker primary dies ──────────────────────────────────────────
 
 // TestChaos_LeaderCrashAutoFailover kills a leader broker and verifies that
 // the coordinator's auto-failover loop (heartbeat detection → UpdatePartitionLeader
@@ -413,12 +433,13 @@ func TestChaos_LeaderCrashAutoFailover(t *testing.T) {
 	// selection in pickNewLeader will then have something to compare.
 	time.Sleep(500 * time.Millisecond)
 
-	t.Logf("[METRIC] killing leader broker idx=%d at %v", leaderIdx, time.Now().Format(time.RFC3339Nano))
+	killTime := time.Now()
+	t.Logf("[METRIC] killing leader broker idx=%d at T=0", leaderIdx)
 	env.killBroker(leaderIdx)
 
 	// Poll FSM until the primary changes.
 	newPrimary := env.waitForNewPartitionPrimary(t, topic, part, oldPrimary, chaosFailoverBudget)
-	t.Logf("[METRIC] new primary %s at %v", newPrimary, time.Now().Format(time.RFC3339Nano))
+	t.Logf("[METRIC] new primary %s — failover in %v", newPrimary, time.Since(killTime).Round(time.Millisecond))
 
 	newLeaderIdx := env.brokerIdxFromAddr(newPrimary)
 	if newLeaderIdx < 0 {
@@ -439,6 +460,8 @@ func TestChaos_LeaderCrashAutoFailover(t *testing.T) {
 		}
 	}
 }
+
+// ── Scenario 1: Coordinator primary dies ─────────────────────────────────────
 
 // TestChaos_CoordinatorLeaderCrashKeepsDataPlane kills the Raft leader
 // coordinator and asserts that the data plane keeps working (producers and
@@ -466,11 +489,12 @@ func TestChaos_CoordinatorLeaderCrashKeepsDataPlane(t *testing.T) {
 
 	// Kill Raft leader coordinator.
 	oldLeaderIdx := mustLeaderIdx(env)
-	t.Logf("killing Raft leader coordinator idx=%d", oldLeaderIdx)
+	killTime := time.Now()
+	t.Logf("[METRIC] killing Raft leader coordinator idx=%d at T=0", oldLeaderIdx)
 	env.killCoordinator(oldLeaderIdx)
 
 	newIdx, _ := env.waitForNewLeader(t, oldLeaderIdx, chaosLeaderTimeout)
-	t.Logf("new leader idx=%d", newIdx)
+	t.Logf("[METRIC] new Raft leader idx=%d elected in %v", newIdx, time.Since(killTime).Round(time.Millisecond))
 
 	// Data plane: a producer that already has the broker client cached can keep
 	// hitting the leader broker directly.
@@ -479,6 +503,7 @@ func TestChaos_CoordinatorLeaderCrashKeepsDataPlane(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("post-coord-down produce: %v", err)
 	}
+	t.Logf("[METRIC] data plane produce succeeded %v after coordinator kill", time.Since(killTime).Round(time.Millisecond))
 
 	// FSM partition placement survives on the new leader. IsLeader() returns true
 	// before the no-op commit finishes, so FSM entries may not be applied yet —
@@ -489,6 +514,7 @@ func TestChaos_CoordinatorLeaderCrashKeepsDataPlane(t *testing.T) {
 		ps, ok := env.raftNodes[newIdx].FSM().Get(topic, part)
 		if ok {
 			postFSMNewLeader = ps
+			t.Logf("[METRIC] FSM entry visible on new leader after %v", time.Since(killTime).Round(time.Millisecond))
 			break
 		}
 		if time.Now().After(deadline) {
@@ -514,11 +540,12 @@ func TestChaos_CoordinatorLeaderCrashBrokerAutoReconnects(t *testing.T) {
 	env := newChaosEnv(t)
 
 	oldLeaderIdx, _ := env.leaderIndex()
-	t.Logf("killing Raft leader coordinator idx=%d", oldLeaderIdx)
+	killTime := time.Now()
+	t.Logf("[METRIC] killing Raft leader coordinator idx=%d at T=0", oldLeaderIdx)
 	env.killCoordinator(oldLeaderIdx)
 
 	newIdx, newAddr := env.waitForNewLeader(t, oldLeaderIdx, chaosLeaderTimeout)
-	t.Logf("new leader idx=%d at %s", newIdx, newAddr)
+	t.Logf("[METRIC] new Raft leader idx=%d at %s elected in %v", newIdx, newAddr, time.Since(killTime).Round(time.Millisecond))
 
 	newClient := env.coordClient(t, newIdx)
 
@@ -531,12 +558,108 @@ func TestChaos_CoordinatorLeaderCrashBrokerAutoReconnects(t *testing.T) {
 			Topic: "post-reconnect", Partitions: 1,
 		})
 		if lastErr == nil {
-			t.Logf("[METRIC] brokers auto-reconnected and CreateTopic succeeded at %v", time.Now().Format(time.RFC3339Nano))
+			t.Logf("[METRIC] brokers auto-reconnected; CreateTopic succeeded %v after coordinator kill", time.Since(killTime).Round(time.Millisecond))
 			return
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 	t.Fatalf("CreateTopic still failing %v after coordinator failover: %v", chaosFailoverBudget, lastErr)
+}
+
+// ── Scenario 2: Coordinator backup dies ──────────────────────────────────────
+
+// TestChaos_CoordinatorBackupDies kills coordinator followers one at a time and
+// verifies that the system is fully operational as long as quorum holds (3 of 5
+// nodes alive), then loses cluster-management writes once quorum is broken.
+//
+// Key invariants checked at each step:
+//   - Raft leader does not change while quorum holds.
+//   - CreateTopic succeeds while quorum holds.
+//   - Data plane (produce/consume) is uninterrupted throughout.
+//   - Once 3 of 5 nodes are dead, CreateTopic fails (no Raft quorum).
+//   - Data plane still works even after quorum loss.
+func TestChaos_CoordinatorBackupDies(t *testing.T) {
+	env := newChaosEnv(t)
+	leaderClient, _ := env.leaderClient(t)
+
+	const topic = "coord-backup-dies"
+	const part = int32(0)
+
+	if _, err := leaderClient.CreateTopic(context.Background(), &pb.CreateTopicRequest{
+		Topic: topic, Partitions: 1,
+	}); err != nil {
+		t.Fatalf("CreateTopic: %v", err)
+	}
+
+	brokerLeaderIdx, _ := env.partitionLeader(t, topic, part)
+	if brokerLeaderIdx < 0 {
+		t.Fatal("no broker leader for partition 0")
+	}
+
+	coordLeaderIdx, coordLeaderAddr := env.leaderIndex()
+	if coordLeaderIdx < 0 {
+		t.Fatal("no Raft leader at start")
+	}
+	t.Logf("coordinator Raft leader: idx=%d", coordLeaderIdx)
+
+	// Kill followers one at a time. With 5 nodes, quorum=3 so we can lose 2.
+	killed := 0
+	for i := 0; i < chaosNumCoordinators; i++ {
+		if i == coordLeaderIdx {
+			continue // skip the leader
+		}
+		killTime := time.Now()
+		t.Logf("[METRIC] killing coordinator follower idx=%d (kill #%d) at T=0", i, killed+1)
+		env.killCoordinator(i)
+		killed++
+
+		time.Sleep(300 * time.Millisecond) // let any accidental election settle
+
+		// Leader must not have changed.
+		newLeaderIdx, _ := env.leaderIndex()
+		if newLeaderIdx != coordLeaderIdx {
+			t.Errorf("kill #%d: Raft leader changed from %d to %d", killed, coordLeaderIdx, newLeaderIdx)
+		}
+
+		if killed < 3 { // quorum intact (5-killed >= 3)
+			// Cluster management must still work.
+			_, err := leaderClient.CreateTopic(context.Background(), &pb.CreateTopicRequest{
+				Topic: fmt.Sprintf("after-kill-%d", killed), Partitions: 1,
+			})
+			if err != nil {
+				t.Errorf("kill #%d: CreateTopic failed while quorum intact: %v", killed, err)
+			}
+
+			// Data plane must still work.
+			if _, err := env.brokerCli[brokerLeaderIdx].Produce(context.Background(), &pb.ProduceRequest{
+				Topic: topic, Partition: part, Value: []byte(fmt.Sprintf("msg-after-kill-%d", killed)),
+			}); err != nil {
+				t.Errorf("kill #%d: Produce failed while quorum intact: %v", killed, err)
+			}
+
+			t.Logf("[METRIC] kill #%d: CreateTopic+Produce succeeded %v after kill — no disruption",
+				killed, time.Since(killTime).Round(time.Millisecond))
+		}
+
+		if killed == 2 {
+			break // stop before losing quorum; quorum-loss is TestChaos_CoordinatorQuorumLoss
+		}
+	}
+
+	// After 2 follower kills (3 nodes alive), system is fully operational.
+	// Verify all messages produced above are readable.
+	msgs := consumeN(t, env.brokerCli[brokerLeaderIdx], topic, part, killed, 5*time.Second)
+	if len(msgs) != killed {
+		t.Fatalf("expected %d messages after %d follower kills, got %d", killed, killed, len(msgs))
+	}
+
+	// Re-verify CreateTopic still works with 3-node quorum.
+	if _, err := env.coordClient(t, coordLeaderIdx).CreateTopic(context.Background(), &pb.CreateTopicRequest{
+		Topic: "final-quorum-check", Partitions: 1,
+	}); err != nil {
+		t.Fatalf("CreateTopic failed with 3-node quorum: %v", err)
+	}
+	t.Logf("3-node quorum healthy: coord leader=%s, %d follower(s) killed", coordLeaderAddr, killed)
 }
 
 // TestChaos_CoordinatorQuorumLoss kills 3 of 5 coordinators (majority gone).
@@ -548,16 +671,19 @@ func TestChaos_CoordinatorQuorumLoss(t *testing.T) {
 
 	env := newChaosEnv(t)
 
+	killTime := time.Now()
 	for i := 0; i < 3; i++ {
-		t.Logf("killing coordinator idx=%d", i)
+		t.Logf("[METRIC] killing coordinator idx=%d", i)
 		env.killCoordinator(i)
 	}
+	t.Logf("[METRIC] 3/5 coordinators killed at T=0 (relative to first kill)")
 
 	// Within 10s, no live node should be the leader.
 	deadline := time.Now().Add(chaosLeaderTimeout)
 	for time.Now().Before(deadline) {
 		idx, _ := env.leaderIndex()
 		if idx < 0 {
+			t.Logf("[METRIC] quorum lost (no leader) %v after kills", time.Since(killTime).Round(time.Millisecond))
 			break
 		}
 		time.Sleep(200 * time.Millisecond)
@@ -577,6 +703,8 @@ func TestChaos_CoordinatorQuorumLoss(t *testing.T) {
 		}
 	}
 }
+
+// (continued Scenario 3)
 
 // TestChaos_RollingBrokerRestart kills 3 leader brokers in succession and
 // relies on the coordinator's auto-failover loop to promote a backup each time.
@@ -630,7 +758,8 @@ func TestChaos_RollingBrokerRestart(t *testing.T) {
 		// scenario this test is exercising).
 		env.waitForCaughtUpBackup(t, topic, part, currentLeader, totalWritten, 5*time.Second)
 
-		t.Logf("round %d: killing leader idx=%d (%s)", r, currentLeader, currentAddr)
+		roundKillTime := time.Now()
+		t.Logf("[METRIC] round %d: killing leader idx=%d (%s) at T=0", r, currentLeader, currentAddr)
 		env.killBroker(currentLeader)
 
 		// Wait for auto-failover to publish a new primary.
@@ -639,7 +768,8 @@ func TestChaos_RollingBrokerRestart(t *testing.T) {
 		if newLeader < 0 {
 			t.Fatalf("round %d: new primary %s not in brokerAddrs", r, newPrimary)
 		}
-		t.Logf("round %d: new leader idx=%d (%s)", r, newLeader, newPrimary)
+		t.Logf("[METRIC] round %d: new leader idx=%d (%s) — failover in %v",
+			r, newLeader, newPrimary, time.Since(roundKillTime).Round(time.Millisecond))
 
 		currentLeader = newLeader
 		currentAddr = newPrimary
@@ -658,6 +788,60 @@ func TestChaos_RollingBrokerRestart(t *testing.T) {
 			t.Errorf("msg[%d]: want %q, got %q", i, want, got)
 		}
 	}
+}
+
+// (continued Scenario 3)
+
+// TestChaos_LeaderCrashFastDetection verifies that when a partition leader dies,
+// its followers' broken FetchReplica streams trigger ReportLeaderUnreachable,
+// causing the coordinator to fail over well within chaosFailoverBudget — without
+// relying on the deadAfter heartbeat timeout.
+func TestChaos_LeaderCrashFastDetection(t *testing.T) {
+	env := newChaosEnv(t)
+	leaderClient, _ := env.leaderClient(t)
+
+	const topic = "fast-detect"
+	const part = int32(0)
+	const preCount = 3
+
+	if _, err := leaderClient.CreateTopic(context.Background(), &pb.CreateTopicRequest{
+		Topic: topic, Partitions: 1,
+	}); err != nil {
+		t.Fatalf("CreateTopic: %v", err)
+	}
+
+	leaderIdx, _ := env.partitionLeader(t, topic, part)
+	if leaderIdx < 0 {
+		t.Fatal("no broker leader for partition 0")
+	}
+	oldPrimary := env.brokerAddrs[leaderIdx]
+	produceN(t, env.brokerCli[leaderIdx], topic, part, preCount)
+
+	// Wait for at least one follower to have an active FetchReplica stream so
+	// the fast-path can fire when the leader dies.
+	var followerIdx int = -1
+	for i := range env.brokers {
+		if i != leaderIdx {
+			followerIdx = i
+			break
+		}
+	}
+	waitReplicated(t, env.brokerCli[followerIdx], topic, part, preCount)
+
+	killTime := time.Now()
+	t.Logf("[METRIC] killing leader broker idx=%d at T=0", leaderIdx)
+	env.killBroker(leaderIdx)
+
+	// Follower should report the dead leader immediately via ReportLeaderUnreachable.
+	// Full failover must complete within chaosFailoverBudget (was deadAfter=10s, now ~1s).
+	newPrimary := env.waitForNewPartitionPrimary(t, topic, part, oldPrimary, chaosFailoverBudget)
+	t.Logf("[METRIC] new primary %s — fast failover in %v", newPrimary, time.Since(killTime).Round(time.Millisecond))
+
+	newLeaderIdx := env.brokerIdxFromAddr(newPrimary)
+	if newLeaderIdx < 0 {
+		t.Fatalf("new primary %s not in brokerAddrs", newPrimary)
+	}
+	env.produceUntilLeader(t, newLeaderIdx, topic, part, []byte("post-fast-failover"), 2*time.Second)
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

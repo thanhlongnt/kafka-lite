@@ -56,18 +56,32 @@ type Partition struct {
 	bgWg     sync.WaitGroup
 
 	broker *Broker
+
+	// ISR eviction timings (set from Broker at creation; 0 → defaults).
+	isrTimeout time.Duration // how long before monitorISR evicts a silent follower
+	isrTick    time.Duration // how often monitorISR runs
 }
 
 func newPartition(topic string, id int32, l log.Log, b *Broker) *Partition {
+	isrTimeout := b.isrTimeout
+	if isrTimeout <= 0 {
+		isrTimeout = 10 * time.Second
+	}
+	isrTick := b.isrTick
+	if isrTick <= 0 {
+		isrTick = time.Second
+	}
 	p := &Partition{
-		topic:    topic,
-		id:       id,
-		log:      l,
-		role:     Leader, // Defaults to Leader; Controller coordinate transitions
-		hw:       l.LogEndOffset(), // Start with HW at end of log so empty partition is immediately readable
-		replicas: make(map[int32]*ReplicaState),
-		notifyCh: make(chan struct{}),
-		broker:   b,
+		topic:      topic,
+		id:         id,
+		log:        l,
+		role:       Leader, // Defaults to Leader; Controller coordinate transitions
+		hw:         l.LogEndOffset(), // Start with HW at end of log so empty partition is immediately readable
+		replicas:   make(map[int32]*ReplicaState),
+		notifyCh:   make(chan struct{}),
+		broker:     b,
+		isrTimeout: isrTimeout,
+		isrTick:    isrTick,
 	}
 	p.cond = sync.NewCond(&p.mu)
 	return p
@@ -148,7 +162,7 @@ func (p *Partition) Close() {
 func (p *Partition) monitorISR(ctx context.Context) {
 	defer p.bgWg.Done()
 
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(p.isrTick)
 	defer ticker.Stop()
 
 	for {
@@ -160,7 +174,7 @@ func (p *Partition) monitorISR(ctx context.Context) {
 			changed := false
 			now := time.Now()
 			for _, r := range p.replicas {
-				if r.inSync && now.Sub(r.lastFetchTime) > 10*time.Second {
+				if r.inSync && now.Sub(r.lastFetchTime) > p.isrTimeout {
 					// Fall out of ISR due to lag
 					r.inSync = false
 					changed = true
@@ -193,6 +207,44 @@ func (p *Partition) monitorISR(ctx context.Context) {
 	}
 }
 
+// scheduleReplicaEviction is launched as a goroutine by the FetchReplica server
+// handler when a follower stream closes. After a grace window it evicts the
+// replica from the ISR if it has not reconnected, advancing the HW immediately.
+// This fast path cuts follower-death detection from isrTimeout (~10s) to ~2s.
+func (p *Partition) scheduleReplicaEviction(replicaID int32, grace time.Duration) {
+	time.Sleep(grace)
+
+	p.mu.Lock()
+	if p.role != Leader {
+		p.mu.Unlock()
+		return
+	}
+	r, ok := p.replicas[replicaID]
+	if !ok || !r.inSync || time.Since(r.lastFetchTime) < grace {
+		p.mu.Unlock()
+		return // follower reconnected within grace window
+	}
+	r.inSync = false
+	isrIDs := p.currentISRIDs()
+	epoch := p.leaderEpoch
+	topic, partition := p.topic, p.id
+
+	minISR := p.log.LogEndOffset()
+	for _, r2 := range p.replicas {
+		if r2.inSync && r2.logEndOffset < minISR {
+			minISR = r2.logEndOffset
+		}
+	}
+	if minISR > p.hw {
+		p.hw = minISR
+		p.cond.Broadcast()
+	}
+	b := p.broker
+	p.mu.Unlock()
+
+	go b.reportISRChange(topic, partition, isrIDs, epoch)
+}
+
 // replicationLoop runs in the background while the partition is a Follower,
 // actively fetching replica data from the Leader.
 func (p *Partition) replicationLoop(ctx context.Context) {
@@ -205,10 +257,12 @@ func (p *Partition) replicationLoop(ctx context.Context) {
 		default:
 			p.mu.RLock()
 			leaderBrokerID := p.leaderBroker
+			topic := p.topic
+			partition := p.id
 			brk := p.broker
 			req := &pb.FetchReplicaRequest{
-				Topic:       p.topic,
-				Partition:   p.id,
+				Topic:       topic,
+				Partition:   partition,
 				FetchOffset: p.log.LogEndOffset(),
 				ReplicaId:   brk.id,
 				LeaderEpoch: p.leaderEpoch,
@@ -256,6 +310,13 @@ func (p *Partition) replicationLoop(ctx context.Context) {
 					p.cond.Broadcast()
 				}
 				p.mu.Unlock()
+			}
+
+			// Stream broke. If the context is still active (we didn't cause the
+			// break), notify the coordinator so it can fast-path failover without
+			// waiting for the full deadAfter window.
+			if ctx.Err() == nil {
+				brk.reportLeaderUnreachable(topic, partition, leaderBrokerID)
 			}
 
 			time.Sleep(500 * time.Millisecond) // Prevent busy spinning on disconnects

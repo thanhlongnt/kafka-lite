@@ -22,6 +22,9 @@ func main() {
 	coordAddr := flag.String("coordinator", "", "comma-separated coordinator gRPC addresses (phase 2, optional)")
 	id := flag.Int("id", 1, "integer ID of this broker")
 	rpcLog := flag.Bool("rpc-log", false, "enable rpc logging to file")
+	heartbeatInterval := flag.Duration("heartbeat-interval", 2*time.Second, "how often to send heartbeats to the coordinator")
+	isrTimeout := flag.Duration("isr-timeout", 10*time.Second, "how long before a silent follower is evicted from ISR")
+	isrTick := flag.Duration("isr-tick", time.Second, "how often the ISR monitor checks follower liveness")
 	flag.Parse()
 
 	var rpcLogger *log.Logger
@@ -43,6 +46,7 @@ func main() {
 	} else {
 		b = broker.New(int32(*id))
 	}
+	b.SetISRTimeout(*isrTimeout, *isrTick)
 
 	if *coordAddr != "" {
 		peers := []string{}
@@ -78,7 +82,7 @@ func main() {
 
 		// Drive broker → coordinator heartbeats so the coordinator's auto-failover
 		// loop knows we're alive and which partition LEOs we hold.
-		go b.HeartbeatLoop(context.Background(), 2*time.Second)
+		go b.HeartbeatLoop(context.Background(), *heartbeatInterval)
 	}
 
 	if *dataDir != "" {

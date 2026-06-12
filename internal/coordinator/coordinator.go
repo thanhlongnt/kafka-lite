@@ -727,6 +727,35 @@ func (c *coordinator) rejoinReturningBroker(ctx context.Context, brokerID int32)
 	}
 }
 
+// ReportLeaderUnreachable is called by a follower broker when its FetchReplica
+// stream to the partition leader breaks. If the coordinator has not heard a
+// heartbeat from that leader recently (stale by more than 2× the tick interval),
+// it immediately triggers failover without waiting for the full deadAfter window.
+// This is best-effort: errors are silently ignored and runFailoverLoop remains
+// the safety net.
+func (c *coordinator) ReportLeaderUnreachable(ctx context.Context, req *pb.ReportLeaderUnreachableRequest) (*pb.ReportLeaderUnreachableResponse, error) {
+	if c.raftNode != nil && !c.raftNode.IsLeader() {
+		return nil, status.Errorf(codes.FailedPrecondition, "not the raft leader; redirect to %s", c.raftNode.LeaderAddr())
+	}
+
+	c.mu.RLock()
+	deadID, ok := c.brokerIDs[req.LeaderAddr]
+	c.mu.RUnlock()
+	if !ok {
+		return &pb.ReportLeaderUnreachableResponse{}, nil
+	}
+
+	c.livenessMu.Lock()
+	ts, seen := c.lastSeen[deadID]
+	stale := !seen || time.Since(ts) > 2*c.tick
+	c.livenessMu.Unlock()
+
+	if stale {
+		go c.failOverBrokerPartitions(ctx, deadID)
+	}
+	return &pb.ReportLeaderUnreachableResponse{}, nil
+}
+
 // runFailoverLoop is the single background goroutine that watches broker
 // liveness and triggers UpdatePartitionLeader for partitions whose primary
 // has gone silent. Only the Raft leader does anything; non-leader ticks are

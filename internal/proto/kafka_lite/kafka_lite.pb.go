@@ -1643,6 +1643,102 @@ func (*InitPartitionsResponse) Descriptor() ([]byte, []int) {
 	return file_kafka_lite_proto_rawDescGZIP(), []int{29}
 }
 
+type ReportLeaderUnreachableRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	LeaderAddr    string                 `protobuf:"bytes,1,opt,name=leader_addr,json=leaderAddr,proto3" json:"leader_addr,omitempty"`
+	Topic         string                 `protobuf:"bytes,2,opt,name=topic,proto3" json:"topic,omitempty"`
+	Partition     int32                  `protobuf:"varint,3,opt,name=partition,proto3" json:"partition,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportLeaderUnreachableRequest) Reset() {
+	*x = ReportLeaderUnreachableRequest{}
+	mi := &file_kafka_lite_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportLeaderUnreachableRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportLeaderUnreachableRequest) ProtoMessage() {}
+
+func (x *ReportLeaderUnreachableRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kafka_lite_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportLeaderUnreachableRequest.ProtoReflect.Descriptor instead.
+func (*ReportLeaderUnreachableRequest) Descriptor() ([]byte, []int) {
+	return file_kafka_lite_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *ReportLeaderUnreachableRequest) GetLeaderAddr() string {
+	if x != nil {
+		return x.LeaderAddr
+	}
+	return ""
+}
+
+func (x *ReportLeaderUnreachableRequest) GetTopic() string {
+	if x != nil {
+		return x.Topic
+	}
+	return ""
+}
+
+func (x *ReportLeaderUnreachableRequest) GetPartition() int32 {
+	if x != nil {
+		return x.Partition
+	}
+	return 0
+}
+
+type ReportLeaderUnreachableResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportLeaderUnreachableResponse) Reset() {
+	*x = ReportLeaderUnreachableResponse{}
+	mi := &file_kafka_lite_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportLeaderUnreachableResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportLeaderUnreachableResponse) ProtoMessage() {}
+
+func (x *ReportLeaderUnreachableResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kafka_lite_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportLeaderUnreachableResponse.ProtoReflect.Descriptor instead.
+func (*ReportLeaderUnreachableResponse) Descriptor() ([]byte, []int) {
+	return file_kafka_lite_proto_rawDescGZIP(), []int{31}
+}
+
 var File_kafka_lite_proto protoreflect.FileDescriptor
 
 const file_kafka_lite_proto_rawDesc = "" +
@@ -1751,7 +1847,13 @@ const file_kafka_lite_proto_rawDesc = "" +
 	"\n" +
 	"partitions\x18\x02 \x03(\x05R\n" +
 	"partitions\"\x18\n" +
-	"\x16InitPartitionsResponse*'\n" +
+	"\x16InitPartitionsResponse\"u\n" +
+	"\x1eReportLeaderUnreachableRequest\x12\x1f\n" +
+	"\vleader_addr\x18\x01 \x01(\tR\n" +
+	"leaderAddr\x12\x14\n" +
+	"\x05topic\x18\x02 \x01(\tR\x05topic\x12\x1c\n" +
+	"\tpartition\x18\x03 \x01(\x05R\tpartition\"!\n" +
+	"\x1fReportLeaderUnreachableResponse*'\n" +
 	"\vReplicaRole\x12\n" +
 	"\n" +
 	"\x06LEADER\x10\x00\x12\f\n" +
@@ -1763,7 +1865,7 @@ const file_kafka_lite_proto_rawDesc = "" +
 	"\fFetchReplica\x12\x1f.kafka_lite.FetchReplicaRequest\x1a\x19.kafka_lite.ReplicaRecord0\x01\x12W\n" +
 	"\x0eInitPartitions\x12!.kafka_lite.InitPartitionsRequest\x1a\".kafka_lite.InitPartitionsResponse\x12K\n" +
 	"\n" +
-	"AssignRole\x12\x1d.kafka_lite.AssignRoleRequest\x1a\x1e.kafka_lite.AssignRoleResponse2\x9f\x05\n" +
+	"AssignRole\x12\x1d.kafka_lite.AssignRoleRequest\x1a\x1e.kafka_lite.AssignRoleResponse2\x93\x06\n" +
 	"\vCoordinator\x12N\n" +
 	"\vCreateTopic\x12\x1e.kafka_lite.CreateTopicRequest\x1a\x1f.kafka_lite.CreateTopicResponse\x12H\n" +
 	"\vGetMetadata\x12\x1b.kafka_lite.MetadataRequest\x1a\x1c.kafka_lite.MetadataResponse\x12W\n" +
@@ -1772,7 +1874,8 @@ const file_kafka_lite_proto_rawDesc = "" +
 	"\rCommitOffsets\x12 .kafka_lite.CommitOffsetsRequest\x1a!.kafka_lite.CommitOffsetsResponse\x12l\n" +
 	"\x15UpdatePartitionLeader\x12(.kafka_lite.UpdatePartitionLeaderRequest\x1a).kafka_lite.UpdatePartitionLeaderResponse\x12E\n" +
 	"\bAlterIsr\x12\x1b.kafka_lite.AlterIsrRequest\x1a\x1c.kafka_lite.AlterIsrResponse\x12H\n" +
-	"\tHeartbeat\x12\x1c.kafka_lite.HeartbeatRequest\x1a\x1d.kafka_lite.HeartbeatResponseB=Z;github.com/thanhlongnt/kafka-lite/internal/proto/kafka_liteb\x06proto3"
+	"\tHeartbeat\x12\x1c.kafka_lite.HeartbeatRequest\x1a\x1d.kafka_lite.HeartbeatResponse\x12r\n" +
+	"\x17ReportLeaderUnreachable\x12*.kafka_lite.ReportLeaderUnreachableRequest\x1a+.kafka_lite.ReportLeaderUnreachableResponseB=Z;github.com/thanhlongnt/kafka-lite/internal/proto/kafka_liteb\x06proto3"
 
 var (
 	file_kafka_lite_proto_rawDescOnce sync.Once
@@ -1787,39 +1890,41 @@ func file_kafka_lite_proto_rawDescGZIP() []byte {
 }
 
 var file_kafka_lite_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_kafka_lite_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_kafka_lite_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_kafka_lite_proto_goTypes = []any{
-	(ReplicaRole)(0),                      // 0: kafka_lite.ReplicaRole
-	(*Message)(nil),                       // 1: kafka_lite.Message
-	(*TopicPartition)(nil),                // 2: kafka_lite.TopicPartition
-	(*AssignRoleRequest)(nil),             // 3: kafka_lite.AssignRoleRequest
-	(*AssignRoleResponse)(nil),            // 4: kafka_lite.AssignRoleResponse
-	(*CreateTopicRequest)(nil),            // 5: kafka_lite.CreateTopicRequest
-	(*CreateTopicResponse)(nil),           // 6: kafka_lite.CreateTopicResponse
-	(*ProduceRequest)(nil),                // 7: kafka_lite.ProduceRequest
-	(*ProduceResponse)(nil),               // 8: kafka_lite.ProduceResponse
-	(*FetchRequest)(nil),                  // 9: kafka_lite.FetchRequest
-	(*FetchReplicaRequest)(nil),           // 10: kafka_lite.FetchReplicaRequest
-	(*ReplicaRecord)(nil),                 // 11: kafka_lite.ReplicaRecord
-	(*PartitionLEO)(nil),                  // 12: kafka_lite.PartitionLEO
-	(*HeartbeatRequest)(nil),              // 13: kafka_lite.HeartbeatRequest
-	(*HeartbeatResponse)(nil),             // 14: kafka_lite.HeartbeatResponse
-	(*MetadataRequest)(nil),               // 15: kafka_lite.MetadataRequest
-	(*PartitionInfo)(nil),                 // 16: kafka_lite.PartitionInfo
-	(*MetadataResponse)(nil),              // 17: kafka_lite.MetadataResponse
-	(*RegisterBrokerRequest)(nil),         // 18: kafka_lite.RegisterBrokerRequest
-	(*RegisterBrokerResponse)(nil),        // 19: kafka_lite.RegisterBrokerResponse
-	(*JoinGroupRequest)(nil),              // 20: kafka_lite.JoinGroupRequest
-	(*JoinGroupResponse)(nil),             // 21: kafka_lite.JoinGroupResponse
-	(*PartitionOffset)(nil),               // 22: kafka_lite.PartitionOffset
-	(*CommitOffsetsRequest)(nil),          // 23: kafka_lite.CommitOffsetsRequest
-	(*CommitOffsetsResponse)(nil),         // 24: kafka_lite.CommitOffsetsResponse
-	(*UpdatePartitionLeaderRequest)(nil),  // 25: kafka_lite.UpdatePartitionLeaderRequest
-	(*UpdatePartitionLeaderResponse)(nil), // 26: kafka_lite.UpdatePartitionLeaderResponse
-	(*AlterIsrRequest)(nil),               // 27: kafka_lite.AlterIsrRequest
-	(*AlterIsrResponse)(nil),              // 28: kafka_lite.AlterIsrResponse
-	(*InitPartitionsRequest)(nil),         // 29: kafka_lite.InitPartitionsRequest
-	(*InitPartitionsResponse)(nil),        // 30: kafka_lite.InitPartitionsResponse
+	(ReplicaRole)(0),                        // 0: kafka_lite.ReplicaRole
+	(*Message)(nil),                         // 1: kafka_lite.Message
+	(*TopicPartition)(nil),                  // 2: kafka_lite.TopicPartition
+	(*AssignRoleRequest)(nil),               // 3: kafka_lite.AssignRoleRequest
+	(*AssignRoleResponse)(nil),              // 4: kafka_lite.AssignRoleResponse
+	(*CreateTopicRequest)(nil),              // 5: kafka_lite.CreateTopicRequest
+	(*CreateTopicResponse)(nil),             // 6: kafka_lite.CreateTopicResponse
+	(*ProduceRequest)(nil),                  // 7: kafka_lite.ProduceRequest
+	(*ProduceResponse)(nil),                 // 8: kafka_lite.ProduceResponse
+	(*FetchRequest)(nil),                    // 9: kafka_lite.FetchRequest
+	(*FetchReplicaRequest)(nil),             // 10: kafka_lite.FetchReplicaRequest
+	(*ReplicaRecord)(nil),                   // 11: kafka_lite.ReplicaRecord
+	(*PartitionLEO)(nil),                    // 12: kafka_lite.PartitionLEO
+	(*HeartbeatRequest)(nil),                // 13: kafka_lite.HeartbeatRequest
+	(*HeartbeatResponse)(nil),               // 14: kafka_lite.HeartbeatResponse
+	(*MetadataRequest)(nil),                 // 15: kafka_lite.MetadataRequest
+	(*PartitionInfo)(nil),                   // 16: kafka_lite.PartitionInfo
+	(*MetadataResponse)(nil),                // 17: kafka_lite.MetadataResponse
+	(*RegisterBrokerRequest)(nil),           // 18: kafka_lite.RegisterBrokerRequest
+	(*RegisterBrokerResponse)(nil),          // 19: kafka_lite.RegisterBrokerResponse
+	(*JoinGroupRequest)(nil),                // 20: kafka_lite.JoinGroupRequest
+	(*JoinGroupResponse)(nil),               // 21: kafka_lite.JoinGroupResponse
+	(*PartitionOffset)(nil),                 // 22: kafka_lite.PartitionOffset
+	(*CommitOffsetsRequest)(nil),            // 23: kafka_lite.CommitOffsetsRequest
+	(*CommitOffsetsResponse)(nil),           // 24: kafka_lite.CommitOffsetsResponse
+	(*UpdatePartitionLeaderRequest)(nil),    // 25: kafka_lite.UpdatePartitionLeaderRequest
+	(*UpdatePartitionLeaderResponse)(nil),   // 26: kafka_lite.UpdatePartitionLeaderResponse
+	(*AlterIsrRequest)(nil),                 // 27: kafka_lite.AlterIsrRequest
+	(*AlterIsrResponse)(nil),                // 28: kafka_lite.AlterIsrResponse
+	(*InitPartitionsRequest)(nil),           // 29: kafka_lite.InitPartitionsRequest
+	(*InitPartitionsResponse)(nil),          // 30: kafka_lite.InitPartitionsResponse
+	(*ReportLeaderUnreachableRequest)(nil),  // 31: kafka_lite.ReportLeaderUnreachableRequest
+	(*ReportLeaderUnreachableResponse)(nil), // 32: kafka_lite.ReportLeaderUnreachableResponse
 }
 var file_kafka_lite_proto_depIdxs = []int32{
 	0,  // 0: kafka_lite.AssignRoleRequest.role:type_name -> kafka_lite.ReplicaRole
@@ -1841,22 +1946,24 @@ var file_kafka_lite_proto_depIdxs = []int32{
 	25, // 16: kafka_lite.Coordinator.UpdatePartitionLeader:input_type -> kafka_lite.UpdatePartitionLeaderRequest
 	27, // 17: kafka_lite.Coordinator.AlterIsr:input_type -> kafka_lite.AlterIsrRequest
 	13, // 18: kafka_lite.Coordinator.Heartbeat:input_type -> kafka_lite.HeartbeatRequest
-	6,  // 19: kafka_lite.Broker.CreateTopic:output_type -> kafka_lite.CreateTopicResponse
-	8,  // 20: kafka_lite.Broker.Produce:output_type -> kafka_lite.ProduceResponse
-	1,  // 21: kafka_lite.Broker.Fetch:output_type -> kafka_lite.Message
-	11, // 22: kafka_lite.Broker.FetchReplica:output_type -> kafka_lite.ReplicaRecord
-	30, // 23: kafka_lite.Broker.InitPartitions:output_type -> kafka_lite.InitPartitionsResponse
-	4,  // 24: kafka_lite.Broker.AssignRole:output_type -> kafka_lite.AssignRoleResponse
-	6,  // 25: kafka_lite.Coordinator.CreateTopic:output_type -> kafka_lite.CreateTopicResponse
-	17, // 26: kafka_lite.Coordinator.GetMetadata:output_type -> kafka_lite.MetadataResponse
-	19, // 27: kafka_lite.Coordinator.RegisterBroker:output_type -> kafka_lite.RegisterBrokerResponse
-	21, // 28: kafka_lite.Coordinator.JoinGroup:output_type -> kafka_lite.JoinGroupResponse
-	24, // 29: kafka_lite.Coordinator.CommitOffsets:output_type -> kafka_lite.CommitOffsetsResponse
-	26, // 30: kafka_lite.Coordinator.UpdatePartitionLeader:output_type -> kafka_lite.UpdatePartitionLeaderResponse
-	28, // 31: kafka_lite.Coordinator.AlterIsr:output_type -> kafka_lite.AlterIsrResponse
-	14, // 32: kafka_lite.Coordinator.Heartbeat:output_type -> kafka_lite.HeartbeatResponse
-	19, // [19:33] is the sub-list for method output_type
-	5,  // [5:19] is the sub-list for method input_type
+	31, // 19: kafka_lite.Coordinator.ReportLeaderUnreachable:input_type -> kafka_lite.ReportLeaderUnreachableRequest
+	6,  // 20: kafka_lite.Broker.CreateTopic:output_type -> kafka_lite.CreateTopicResponse
+	8,  // 21: kafka_lite.Broker.Produce:output_type -> kafka_lite.ProduceResponse
+	1,  // 22: kafka_lite.Broker.Fetch:output_type -> kafka_lite.Message
+	11, // 23: kafka_lite.Broker.FetchReplica:output_type -> kafka_lite.ReplicaRecord
+	30, // 24: kafka_lite.Broker.InitPartitions:output_type -> kafka_lite.InitPartitionsResponse
+	4,  // 25: kafka_lite.Broker.AssignRole:output_type -> kafka_lite.AssignRoleResponse
+	6,  // 26: kafka_lite.Coordinator.CreateTopic:output_type -> kafka_lite.CreateTopicResponse
+	17, // 27: kafka_lite.Coordinator.GetMetadata:output_type -> kafka_lite.MetadataResponse
+	19, // 28: kafka_lite.Coordinator.RegisterBroker:output_type -> kafka_lite.RegisterBrokerResponse
+	21, // 29: kafka_lite.Coordinator.JoinGroup:output_type -> kafka_lite.JoinGroupResponse
+	24, // 30: kafka_lite.Coordinator.CommitOffsets:output_type -> kafka_lite.CommitOffsetsResponse
+	26, // 31: kafka_lite.Coordinator.UpdatePartitionLeader:output_type -> kafka_lite.UpdatePartitionLeaderResponse
+	28, // 32: kafka_lite.Coordinator.AlterIsr:output_type -> kafka_lite.AlterIsrResponse
+	14, // 33: kafka_lite.Coordinator.Heartbeat:output_type -> kafka_lite.HeartbeatResponse
+	32, // 34: kafka_lite.Coordinator.ReportLeaderUnreachable:output_type -> kafka_lite.ReportLeaderUnreachableResponse
+	20, // [20:35] is the sub-list for method output_type
+	5,  // [5:20] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -1873,7 +1980,7 @@ func file_kafka_lite_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kafka_lite_proto_rawDesc), len(file_kafka_lite_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   30,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

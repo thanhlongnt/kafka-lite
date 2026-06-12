@@ -39,6 +39,10 @@ type Broker struct {
 	coordClient pb.CoordinatorClient
 	coordConn   *grpc.ClientConn
 	coordPeers  []string // all known coordinator gRPC addresses for leader discovery
+
+	// ISR eviction timings for partitions created by this broker.
+	isrTimeout time.Duration // 0 → partition default (10s)
+	isrTick    time.Duration // 0 → partition default (1s)
 }
 
 // New returns a Broker that stores all messages in memory.
@@ -139,6 +143,13 @@ func (b *Broker) SetCoordinatorPeers(peers []string) {
 // Serve sets it automatically; call this in test environments that skip Serve.
 func (b *Broker) SetSelfAddr(addr string) {
 	b.selfAddr = addr
+}
+
+// SetISRTimeout overrides the ISR eviction timeout and tick interval for all
+// partitions subsequently created by this broker. Call before topic creation.
+func (b *Broker) SetISRTimeout(timeout, tick time.Duration) {
+	b.isrTimeout = timeout
+	b.isrTick = tick
 }
 
 // ConnectCoordinator dials the coordinator and stores the client for proxying and registration.
@@ -300,6 +311,15 @@ func (b *Broker) FetchReplica(req *pb.FetchReplicaRequest, stream pb.Broker_Fetc
 	if err != nil {
 		return err
 	}
+
+	// When the follower stream closes (follower died or disconnected), schedule
+	// a fast-path ISR eviction. The grace window (half of isrTimeout, min 2s)
+	// allows the follower to reconnect before being evicted.
+	evictGrace := p.isrTimeout / 2
+	if evictGrace < 2*time.Second {
+		evictGrace = 2 * time.Second
+	}
+	defer func() { go p.scheduleReplicaEviction(req.ReplicaId, evictGrace) }()
 
 	p.updateReplicaState(req.ReplicaId, req.FetchOffset)
 
@@ -588,6 +608,27 @@ func (b *Broker) reportISRChange(topic string, partition int32, isrIDs []int32, 
 		Partition: partition,
 		Epoch:     epoch,
 		IsrIds:    isrIDs,
+	})
+}
+
+// reportLeaderUnreachable notifies the coordinator that the leader for a partition
+// is unreachable. Called by replicationLoop when a FetchReplica stream breaks.
+// Best-effort: errors are silently ignored; runFailoverLoop is the safety net.
+func (b *Broker) reportLeaderUnreachable(topic string, partition int32, leaderBrokerID int32) {
+	c := b.coordClientSafe()
+	if c == nil {
+		return
+	}
+	b.mu.RLock()
+	leaderAddr := b.peerAddrs[leaderBrokerID]
+	b.mu.RUnlock()
+	if leaderAddr == "" {
+		return
+	}
+	_, _ = c.ReportLeaderUnreachable(context.Background(), &pb.ReportLeaderUnreachableRequest{
+		LeaderAddr: leaderAddr,
+		Topic:      topic,
+		Partition:  partition,
 	})
 }
 
