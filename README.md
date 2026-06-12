@@ -121,6 +121,77 @@ rebalances the assignment. Offsets are committed every N messages with `-commit-
 ./cli consume -broker localhost:9094 -topic events -group grp1 -member m2 -commit-every 5
 ```
 
+## Load Generator
+
+`cmd/throughput` is a closed-loop throughput generator that measures sustainable msgs/sec, MB/sec, and latency percentiles against a live cluster. See [docs/load-generator.md](docs/load-generator.md) for a full explanation of how it works.
+
+### Quick start: coordinator routing benchmark
+
+`scripts/run-routing-bench.sh` builds all binaries, spins up **5 coordinators + 20 brokers** in the background, runs the throughput test, then tears everything down on exit.
+
+```bash
+bash scripts/run-routing-bench.sh
+```
+
+Override any parameter via environment variable:
+
+```bash
+CONCURRENCY=40 DURATION=30s MSG_SIZE=1024 bash scripts/run-routing-bench.sh
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TOPIC` | `bench` | Topic name |
+| `PARTITIONS` | `20` | Number of partitions |
+| `CONCURRENCY` | `20` | Parallel producer goroutines |
+| `DURATION` | `15s` | Measurement window |
+| `MSG_SIZE` | `256` | Payload size in bytes |
+
+Logs for each process are written to `logs/` in the project root and kept after the run.
+
+### Minikube (isolated containers)
+
+`scripts/run-minikube-bench.sh` runs the same benchmark inside Minikube — each broker and coordinator gets its own container with dedicated cgroups and communicates over the cluster network instead of loopback, giving more realistic isolation.
+
+**Prerequisites:** [minikube](https://minikube.sigs.k8s.io/docs/start/) and [kubectl](https://kubernetes.io/docs/tasks/tools/).
+
+```bash
+# Start Minikube with enough resources for 25 pods
+minikube start --cpus=6 --memory=8g
+
+# Build image, deploy 5 coordinators + 20 brokers, run throughput job
+bash scripts/run-minikube-bench.sh
+```
+
+Override parameters the same way:
+
+```bash
+CONCURRENCY=40 DURATION=120s bash scripts/run-minikube-bench.sh
+```
+
+The script streams the throughput job's output live and tears down all pods on exit (Ctrl-C or normal finish).
+
+To inspect individual pod logs after a run:
+
+```bash
+kubectl logs coordinator-0
+kubectl logs broker-3
+```
+
+### Manual usage
+
+```bash
+go build -o throughput ./cmd/throughput
+
+# Single broker
+./throughput -broker localhost:9092 -concurrency 8 -duration 10s
+
+# With coordinator routing
+./throughput -broker localhost:9092 \
+             -coordinator localhost:9093 \
+             -route -partitions 6 -concurrency 12
+```
+
 ## Run Tests
 
 ```bash

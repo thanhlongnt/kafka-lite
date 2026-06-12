@@ -66,6 +66,7 @@ func main() {
 	var producedMsgs  atomic.Int64
 	var producedBytes atomic.Int64
 	var consumedMsgs  atomic.Int64
+	var errCount      atomic.Int64
 
 	// Per-goroutine latency slices — no mutex on hot path.
 	latBufs := make([][]time.Duration, *concurrency)
@@ -84,28 +85,35 @@ func main() {
 	defer cancel()
 
 	// Consumer goroutines — one per partition, streaming from offset 0.
+	// Outer loop reconnects after broker crashes. A 1s backoff prevents tight
+	// spinning when a partition is not yet assigned to the entry broker.
 	var consumerWg sync.WaitGroup
 	for i := 0; i < *numConsumers; i++ {
 		partIdx := int32(i % *partitions)
 		consumerWg.Add(1)
 		go func(partIdx int32) {
 			defer consumerWg.Done()
-			c, err := consumer.New(*brokerAddr, *topic, partIdx, 0)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "consumer[%d] dial: %v\n", partIdx, err)
-				return
-			}
-			defer c.Close()
-			for {
-				_, err := c.Poll(runCtx)
-				if runCtx.Err() != nil {
-					return
-				}
+			var resumeOffset int64
+			for runCtx.Err() == nil {
+				c, err := consumer.New(*brokerAddr, *topic, partIdx, resumeOffset)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "consumer[%d] poll: %v\n", partIdx, err)
-					return
+					time.Sleep(time.Second)
+					continue
 				}
-				consumedMsgs.Add(1)
+				for {
+					msg, err := c.Poll(runCtx)
+					if runCtx.Err() != nil {
+						c.Close()
+						return
+					}
+					if err != nil {
+						c.Close()
+						time.Sleep(time.Second)
+						break
+					}
+					resumeOffset = msg.Offset + 1
+					consumedMsgs.Add(1)
+				}
 			}
 		}(partIdx)
 	}
@@ -136,7 +144,7 @@ func main() {
 					return
 				}
 				if sendErr != nil {
-					fmt.Fprintf(os.Stderr, "produce: %v\n", sendErr)
+					errCount.Add(1)
 					continue
 				}
 				producedMsgs.Add(1)
@@ -150,7 +158,7 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
-		var prevMsgs, prevBytes int64
+		var prevMsgs, prevBytes, prevErrs int64
 		var sec int
 		for {
 			select {
@@ -160,15 +168,18 @@ func main() {
 				sec++
 				curMsgs := producedMsgs.Load()
 				curBytes := producedBytes.Load()
+				curErrs := errCount.Load()
 				lag := curMsgs - consumedMsgs.Load()
-				fmt.Printf("[%3ds] produce: %7d msg/s  %6.2f MB/s | consume lag: %d msgs\n",
+				fmt.Printf("[%3ds] produce: %7d msg/s  %6.2f MB/s  errs/s: %4d | consume lag: %d msgs\n",
 					sec,
 					curMsgs-prevMsgs,
 					float64(curBytes-prevBytes)/1024/1024,
+					curErrs-prevErrs,
 					lag,
 				)
 				prevMsgs = curMsgs
 				prevBytes = curBytes
+				prevErrs = curErrs
 			}
 		}
 	}()
@@ -188,8 +199,8 @@ func main() {
 	totalBytes := producedBytes.Load()
 	seconds := dur.Seconds()
 
-	fmt.Printf("\n[DONE] produced=%d  consumed=%d  avg=%.0f msg/s  %.2f MB/s\n",
-		totalMsgs, totalConsumed,
+	fmt.Printf("\n[DONE] produced=%d  errors=%d  consumed=%d  avg=%.0f msg/s  %.2f MB/s\n",
+		totalMsgs, errCount.Load(), totalConsumed,
 		float64(totalMsgs)/seconds,
 		float64(totalBytes)/1024/1024/seconds,
 	)

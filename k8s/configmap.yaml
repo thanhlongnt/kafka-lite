@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-lite-scripts
+data:
+  start-coordinator.sh: |
+    #!/bin/sh
+    set -e
+    ORDINAL="${POD_NAME##*-}"
+    NS="${NAMESPACE:-default}"
+    SVC="coordinator.$NS.svc.cluster.local"
+    RAFT_PORT=7000
+    GRPC_PORT=9093
+    REPLICAS=5
+
+    MY_RAFT_ADDR="coordinator-$ORDINAL.$SVC:$RAFT_PORT"
+
+    # Wait for own DNS entry to exist before binding.
+    echo "waiting for $MY_RAFT_ADDR to resolve..."
+    until getent hosts "coordinator-$ORDINAL.$SVC" >/dev/null 2>&1; do sleep 1; done
+    echo "DNS ready, starting coordinator-$ORDINAL"
+
+    PEERS=""
+    for i in $(seq 0 $((REPLICAS-1))); do
+      [ "$i" -eq "$ORDINAL" ] && continue
+      PEERS="${PEERS:+$PEERS,}coordinator-$i=coordinator-$i.$SVC:$RAFT_PORT"
+    done
+
+    exec /usr/local/bin/coordinator \
+      -addr                ":$GRPC_PORT" \
+      -raft-id             "coordinator-$ORDINAL" \
+      -raft-bind           "$MY_RAFT_ADDR" \
+      -data-dir            /data/raft \
+      -peers               "$PEERS" \
+      -failover-tick       2s \
+      -failover-dead-after 10s \
+      -failover-grace      3s
+
+  start-broker.sh: |
+    #!/bin/sh
+    set -e
+    ORDINAL="${POD_NAME##*-}"
+    NS="${NAMESPACE:-default}"
+    BROKER_SVC="broker.$NS.svc.cluster.local"
+    COORD_SVC="coordinator.$NS.svc.cluster.local"
+    ID=$((ORDINAL + 1))
+    ADVERTISE="broker-$ORDINAL.$BROKER_SVC:9092"
+
+    COORDS=""
+    for i in 0 1 2 3 4; do
+      COORDS="${COORDS:+$COORDS,}coordinator-$i.$COORD_SVC:9093"
+    done
+
+    # Wait for at least one coordinator to accept connections.
+    echo "broker-$ORDINAL waiting for coordinator..."
+    until getent hosts "coordinator-0.$COORD_SVC" >/dev/null 2>&1; do sleep 1; done
+    sleep 2  # extra grace for Raft leader election
+
+    echo "starting broker-$ORDINAL (id=$ID advertise=$ADVERTISE)"
+    exec /usr/local/bin/broker \
+      -addr      ":9092" \
+      -id        "$ID" \
+      -advertise "$ADVERTISE" \
+      -coordinator "$COORDS"
+
+  start-throughput.sh: |
+    #!/bin/sh
+    NS="${NAMESPACE:-default}"
+    BROKER_SVC="broker.$NS.svc.cluster.local"
+    COORD_SVC="coordinator.$NS.svc.cluster.local"
+
+    COORDS=""
+    for i in 0 1 2 3 4; do
+      COORDS="${COORDS:+$COORDS,}coordinator-$i.$COORD_SVC:9093"
+    done
+
+    exec /usr/local/bin/throughput \
+      -broker      "broker-0.$BROKER_SVC:9092" \
+      -coordinator "$COORDS" \
+      -route \
+      -topic       "${TOPIC:-bench}" \
+      -partitions  "${PARTITIONS:-20}" \
+      -concurrency "${CONCURRENCY:-20}" \
+      -duration    "${DURATION:-60s}" \
+      -msg-size    "${MSG_SIZE:-256}"
