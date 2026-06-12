@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: throughput
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: throughput
+          image: kafka-lite:latest
+          imagePullPolicy: Never
+          command: ["/bin/sh", "/scripts/start-throughput.sh"]
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: TOPIC
+              value: "bench"
+            - name: PARTITIONS
+              value: "20"
+            - name: CONCURRENCY
+              value: "20"
+            - name: DURATION
+              value: "60s"
+            - name: MSG_SIZE
+              value: "256"
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: scripts
+          configMap:
+            name: kafka-lite-scripts
+            defaultMode: 0755

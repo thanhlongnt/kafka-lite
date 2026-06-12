@@ -5,16 +5,20 @@ import (
 	"fmt"
 	pb "github.com/thanhlongnt/kafka-lite/internal/proto/kafka_lite"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"hash/fnv"
+	"strings"
 	"sync"
 )
 
 // Producer sends messages to a single broker. Phase 1 — no partition routing;
 // the caller specifies the target partition explicitly.
 type Producer struct {
-	client pb.BrokerClient
-	conn   *grpc.ClientConn
+	client    pb.BrokerClient
+	conn      *grpc.ClientConn
+	coordConn *grpc.ClientConn // non-nil when connected directly to a coordinator
 
 	// Phase 2: Coordinator client and cached metadata for partition routing.
 	coordClient   pb.CoordinatorClient
@@ -36,9 +40,12 @@ func New(brokerAddr string, opts ...grpc.DialOption) (*Producer, error) {
 	return &Producer{client: pb.NewBrokerClient(conn), conn: conn}, nil
 }
 
-// ConnectCoordinator creates a coordinator client over broker -> broker exposes a proxy
-func (p *Producer) ConnectCoordinator() {
-	p.coordClient = pb.NewCoordinatorClient(p.conn)
+// ConnectCoordinator enables partition routing. With no arguments it proxies
+// coordinator RPCs through the entry broker (useful for in-process tests).
+// With a comma-separated list of coordinator addresses it connects directly to
+// the first reachable coordinator, which is required when the entry broker may
+// itself be killed during a degradation test.
+func (p *Producer) ConnectCoordinator(coordAddrs ...string) {
 	p.metaCache = make(map[string][]*pb.PartitionInfo)
 	p.brokerClients = make(map[string]pb.BrokerClient)
 	p.dialBroker = func(_ context.Context, addr string) (pb.BrokerClient, error) {
@@ -48,6 +55,31 @@ func (p *Producer) ConnectCoordinator() {
 		}
 		return pb.NewBrokerClient(conn), nil
 	}
+
+	if len(coordAddrs) == 0 {
+		// Proxy through the entry broker (backward-compatible path).
+		p.coordClient = pb.NewCoordinatorClient(p.conn)
+		return
+	}
+
+	// Connect directly to one of the provided coordinator addresses.
+	for _, raw := range coordAddrs {
+		for _, addr := range strings.Split(raw, ",") {
+			addr = strings.TrimSpace(addr)
+			if addr == "" {
+				continue
+			}
+			conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			if err != nil {
+				continue
+			}
+			p.coordConn = conn
+			p.coordClient = pb.NewCoordinatorClient(conn)
+			return
+		}
+	}
+	// Fallback to broker proxy if no address was dialable.
+	p.coordClient = pb.NewCoordinatorClient(p.conn)
 }
 
 // SetDialer used to open connections to partition owners
@@ -87,13 +119,26 @@ func (p *Producer) Route(ctx context.Context, topic string, key, value []byte) (
 		Value:     value,
 	})
 	if err != nil {
+		code := status.Code(err)
+		if code == codes.FailedPrecondition || code == codes.Unavailable {
+			p.mu.Lock()
+			delete(p.metaCache, topic)
+			if code == codes.Unavailable {
+				// Evict the dead connection so the next call dials the new owner.
+				delete(p.brokerClients, parts[partition].BrokerAddr)
+			}
+			p.mu.Unlock()
+		}
 		return 0, 0, err
 	}
 	return partition, resp.Offset, nil
 }
 
-// Close releases the underlying gRPC connection.
+// Close releases the underlying gRPC connection(s).
 func (p *Producer) Close() error {
+	if p.coordConn != nil {
+		p.coordConn.Close()
+	}
 	return p.conn.Close()
 }
 
