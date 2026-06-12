@@ -96,7 +96,23 @@ service Coordinator {
   rpc CommitOffsets(CommitOffsetsRequest)   returns (CommitOffsetsResponse);
   rpc UpdatePartitionLeader(UpdatePartitionLeaderRequest) returns (UpdatePartitionLeaderResponse);
   rpc AlterIsr(AlterIsrRequest) returns (AlterIsrResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc ReportLeaderUnreachable(ReportLeaderUnreachableRequest) returns (ReportLeaderUnreachableResponse);
 }
+
+message PartitionLEO {
+  string topic          = 1;
+  int32  partition      = 2;
+  int64  log_end_offset = 3;
+}
+
+message HeartbeatRequest {
+  int32                 broker_id      = 1;
+  string                broker_addr    = 2;
+  repeated PartitionLEO partition_leos = 3;
+}
+
+message HeartbeatResponse {}
 
 message MetadataRequest {
   string topic = 1;
@@ -161,3 +177,10 @@ message InitPartitionsRequest {
   repeated int32 partitions = 2;
 }
 message InitPartitionsResponse {}
+
+message ReportLeaderUnreachableRequest {
+  string leader_addr = 1;
+  string topic       = 2;
+  int32  partition   = 3;
+}
+message ReportLeaderUnreachableResponse {}

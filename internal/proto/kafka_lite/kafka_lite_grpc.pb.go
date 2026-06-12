@@ -318,13 +318,15 @@ var Broker_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	Coordinator_CreateTopic_FullMethodName           = "/kafka_lite.Coordinator/CreateTopic"
-	Coordinator_GetMetadata_FullMethodName           = "/kafka_lite.Coordinator/GetMetadata"
-	Coordinator_RegisterBroker_FullMethodName        = "/kafka_lite.Coordinator/RegisterBroker"
-	Coordinator_JoinGroup_FullMethodName             = "/kafka_lite.Coordinator/JoinGroup"
-	Coordinator_CommitOffsets_FullMethodName         = "/kafka_lite.Coordinator/CommitOffsets"
-	Coordinator_UpdatePartitionLeader_FullMethodName = "/kafka_lite.Coordinator/UpdatePartitionLeader"
-	Coordinator_AlterIsr_FullMethodName              = "/kafka_lite.Coordinator/AlterIsr"
+	Coordinator_CreateTopic_FullMethodName             = "/kafka_lite.Coordinator/CreateTopic"
+	Coordinator_GetMetadata_FullMethodName             = "/kafka_lite.Coordinator/GetMetadata"
+	Coordinator_RegisterBroker_FullMethodName          = "/kafka_lite.Coordinator/RegisterBroker"
+	Coordinator_JoinGroup_FullMethodName               = "/kafka_lite.Coordinator/JoinGroup"
+	Coordinator_CommitOffsets_FullMethodName           = "/kafka_lite.Coordinator/CommitOffsets"
+	Coordinator_UpdatePartitionLeader_FullMethodName   = "/kafka_lite.Coordinator/UpdatePartitionLeader"
+	Coordinator_AlterIsr_FullMethodName                = "/kafka_lite.Coordinator/AlterIsr"
+	Coordinator_Heartbeat_FullMethodName               = "/kafka_lite.Coordinator/Heartbeat"
+	Coordinator_ReportLeaderUnreachable_FullMethodName = "/kafka_lite.Coordinator/ReportLeaderUnreachable"
 )
 
 // CoordinatorClient is the client API for Coordinator service.
@@ -338,6 +340,8 @@ type CoordinatorClient interface {
 	CommitOffsets(ctx context.Context, in *CommitOffsetsRequest, opts ...grpc.CallOption) (*CommitOffsetsResponse, error)
 	UpdatePartitionLeader(ctx context.Context, in *UpdatePartitionLeaderRequest, opts ...grpc.CallOption) (*UpdatePartitionLeaderResponse, error)
 	AlterIsr(ctx context.Context, in *AlterIsrRequest, opts ...grpc.CallOption) (*AlterIsrResponse, error)
+	Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error)
+	ReportLeaderUnreachable(ctx context.Context, in *ReportLeaderUnreachableRequest, opts ...grpc.CallOption) (*ReportLeaderUnreachableResponse, error)
 }
 
 type coordinatorClient struct {
@@ -418,6 +422,26 @@ func (c *coordinatorClient) AlterIsr(ctx context.Context, in *AlterIsrRequest, o
 	return out, nil
 }
 
+func (c *coordinatorClient) Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HeartbeatResponse)
+	err := c.cc.Invoke(ctx, Coordinator_Heartbeat_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coordinatorClient) ReportLeaderUnreachable(ctx context.Context, in *ReportLeaderUnreachableRequest, opts ...grpc.CallOption) (*ReportLeaderUnreachableResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportLeaderUnreachableResponse)
+	err := c.cc.Invoke(ctx, Coordinator_ReportLeaderUnreachable_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CoordinatorServer is the server API for Coordinator service.
 // All implementations must embed UnimplementedCoordinatorServer
 // for forward compatibility.
@@ -429,6 +453,8 @@ type CoordinatorServer interface {
 	CommitOffsets(context.Context, *CommitOffsetsRequest) (*CommitOffsetsResponse, error)
 	UpdatePartitionLeader(context.Context, *UpdatePartitionLeaderRequest) (*UpdatePartitionLeaderResponse, error)
 	AlterIsr(context.Context, *AlterIsrRequest) (*AlterIsrResponse, error)
+	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error)
+	ReportLeaderUnreachable(context.Context, *ReportLeaderUnreachableRequest) (*ReportLeaderUnreachableResponse, error)
 	mustEmbedUnimplementedCoordinatorServer()
 }
 
@@ -459,6 +485,12 @@ func (UnimplementedCoordinatorServer) UpdatePartitionLeader(context.Context, *Up
 }
 func (UnimplementedCoordinatorServer) AlterIsr(context.Context, *AlterIsrRequest) (*AlterIsrResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AlterIsr not implemented")
+}
+func (UnimplementedCoordinatorServer) Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Heartbeat not implemented")
+}
+func (UnimplementedCoordinatorServer) ReportLeaderUnreachable(context.Context, *ReportLeaderUnreachableRequest) (*ReportLeaderUnreachableResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportLeaderUnreachable not implemented")
 }
 func (UnimplementedCoordinatorServer) mustEmbedUnimplementedCoordinatorServer() {}
 func (UnimplementedCoordinatorServer) testEmbeddedByValue()                     {}
@@ -607,6 +639,42 @@ func _Coordinator_AlterIsr_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Coordinator_Heartbeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HeartbeatRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoordinatorServer).Heartbeat(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Coordinator_Heartbeat_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoordinatorServer).Heartbeat(ctx, req.(*HeartbeatRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Coordinator_ReportLeaderUnreachable_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportLeaderUnreachableRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoordinatorServer).ReportLeaderUnreachable(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Coordinator_ReportLeaderUnreachable_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoordinatorServer).ReportLeaderUnreachable(ctx, req.(*ReportLeaderUnreachableRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Coordinator_ServiceDesc is the grpc.ServiceDesc for Coordinator service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -641,6 +709,14 @@ var Coordinator_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AlterIsr",
 			Handler:    _Coordinator_AlterIsr_Handler,
+		},
+		{
+			MethodName: "Heartbeat",
+			Handler:    _Coordinator_Heartbeat_Handler,
+		},
+		{
+			MethodName: "ReportLeaderUnreachable",
+			Handler:    _Coordinator_ReportLeaderUnreachable_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

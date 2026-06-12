@@ -25,7 +25,8 @@ type Node struct {
 //   - id       — unique server ID (e.g. "node1")
 //   - bindAddr — TCP address this node listens on for Raft RPCs (e.g. "127.0.0.1:7000")
 //   - dataDir  — directory for BoltDB stores and snapshots (created if absent)
-func NewNode(id, bindAddr, dataDir string) (*Node, error) {
+//   - rpcLogger - optionally records Raft RPC events
+func NewNode(id, bindAddr, dataDir string, rpcLogger *log.Logger) (*Node, error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("raft: mkdir %s: %w", dataDir, err)
 	}
@@ -48,10 +49,12 @@ func NewNode(id, bindAddr, dataDir string) (*Node, error) {
 		return nil, fmt.Errorf("raft: snapshot store: %w", err)
 	}
 
-	transport, err := raft.NewTCPTransport(bindAddr, nil, 3, 10*time.Second, nil)
+	baseTransport, err := raft.NewTCPTransport(bindAddr, nil, 3, 10*time.Second, nil)
 	if err != nil {
 		return nil, fmt.Errorf("raft: transport: %w", err)
 	}
+
+	transport := NewServerLoggingTransport(baseTransport, rpcLogger)
 
 	fsm := newFSM()
 	r, err := raft.NewRaft(cfg, fsm, logStore, stableStore, snapshots, transport)
