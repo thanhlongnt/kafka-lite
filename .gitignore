@@ -2,3 +2,4 @@ docs/*
 data
 broker
 cli
+logs
